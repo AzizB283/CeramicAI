@@ -94,6 +94,39 @@ describe("POST /api/chat/message — distributor path is priority", () => {
   });
 });
 
+describe("POST /api/chat/message — terminal replay does not double-insert", () => {
+  it("404s on replay and persists exactly one lead for the session", async () => {
+    const start = await request(app).post("/api/chat/session").send({ mode: "factory" });
+    const sessionId = start.body.sessionId;
+    createdSessionIds.push(sessionId);
+
+    const choose = async (choiceLabel: string) =>
+      request(app).post("/api/chat/message").send({ sessionId, choiceLabel });
+    const type = async (text: string) =>
+      request(app).post("/api/chat/message").send({ sessionId, text });
+
+    await choose("Retailer / Tile Shop Owner");
+    await choose("GVT / Vitrified Floor Tiles");
+    await choose("600×600");
+    await choose("Matte");
+    await choose("500–2,000 boxes");
+    await type("Priya Mehta");
+    const done = await type("Rajkot");
+
+    expect(done.status).toBe(200);
+    expect(done.body.terminal).toBe(true);
+
+    // Replay the same sessionId — the session was deleted after persistence.
+    const replay = await request(app).post("/api/chat/message").send({ sessionId, text: "again" });
+    expect(replay.status).toBe(404);
+
+    const clientId = await ensureDemoClient();
+    const leads = await runWithClient(clientId, () => storage.getLeads());
+    const mine = leads.filter((l) => l.sessionId === sessionId);
+    expect(mine).toHaveLength(1);
+  });
+});
+
 describe("POST /api/chat/message — unknown session", () => {
   it("returns 404 for a missing session", async () => {
     const res = await request(app).post("/api/chat/message").send({ sessionId: "nope", text: "hi" });
