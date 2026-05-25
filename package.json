@@ -10,9 +10,9 @@
     "server"
   ],
   "scripts": {
-    "dev": "concurrently --names \"api,web\" --prefix-colors \"cyan,magenta\" --kill-others \"npm:dev:server\" \"npm:dev:client\"",
+    "dev": "concurrently --names \"api,web\" --prefix-colors \"cyan,magenta\" --kill-others-on-fail \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "npm run dev --workspace client",
-    "dev:server": "tsx watch --env-file-if-exists=.env --env-file-if-exists=.env.local --tsconfig server/tsconfig.json server/index.ts",
+    "dev:server": "CHOKIDAR_USEPOLLING=true tsx watch --env-file-if-exists=.env --env-file-if-exists=.env.local --tsconfig server/tsconfig.json server/index.ts",
     "build": "npm run build --workspace client",
     "preview": "npm run preview --workspace client",
     "check": "npm run check --workspace client",
