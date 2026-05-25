@@ -1,0 +1,23 @@
+{
+  "name": "ceramicbot",
+  "version": "1.0.0",
+  "description": "CeramicBot — AI WhatsApp & Web Chat Bot for ceramic factories & exporters (Aurex Auto).",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace client",
+    "build": "npm run build --workspace client",
+    "preview": "npm run preview --workspace client",
+    "check": "npm run check --workspace client",
+    "dev:server": "tsx watch server/index.ts",
+    "check:server": "npm run check --workspace server",
+    "test:server": "npm run test --workspace server",
+    "db:generate": "npm run db:generate --workspace server",
+    "db:push": "npm run db:push --workspace server"
+  }
+}
