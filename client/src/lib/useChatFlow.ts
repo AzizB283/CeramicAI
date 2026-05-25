@@ -1,35 +1,31 @@
 import { useCallback, useRef, useState } from "react";
 import type {
   ChatMessage,
-  FlowStep,
   LeadDraft,
   Mode,
   QuickReply,
 } from "@shared/types";
+import { ENTRY, STEPS } from "@shared/flows";
 import {
-  DEMO_CLIENT_NAME,
-  ENTRY,
-  STEPS,
-} from "@shared/flows";
+  advanceFlow,
+  startFlow,
+  type FlowSnapshot,
+  type OwnerAlert,
+} from "@shared/flowEngine";
+
+export type { OwnerAlert };
 
 let msgSeq = 0;
 const nextId = () => `m${++msgSeq}`;
 
-/** Fill {client} / {name} placeholders in bot copy. */
-function render(text: string, mode: Mode, lead: LeadDraft): string {
-  return text
-    .replaceAll("{client}", DEMO_CLIENT_NAME[mode])
-    .replaceAll("{name}", lead.buyerName ?? "there");
-}
-
-export interface OwnerAlert {
-  priority: boolean;
-  lines: string[];
-}
-
 /**
  * Drives the demo conversation: holds the message thread, the current step,
  * the accumulated lead, typing state, and the simulated owner alert.
+ *
+ * The pure flow logic (which step is next, what lead field to set, placeholder
+ * rendering, owner-alert payload) lives in `@shared/flowEngine` so the Phase 2
+ * server shares it. This hook only owns the UI concerns: the message thread,
+ * the typing-dots timers, and mapping snapshots to bubbles.
  *
  * In Phase 2 this hook is replaced by calls to POST /api/chat/message, but the
  * message/lead shapes stay the same (they live in @shared).
@@ -48,89 +44,32 @@ export function useChatFlow(initialMode: Mode) {
     timers.current = [];
   };
 
-  /** Emit a step's bot bubbles one-by-one with a typing indicator between. */
-  const playStep = useCallback(
-    (step: FlowStep, currentMode: Mode, currentLead: LeadDraft) => {
-      clearTimers();
-      let delay = 0;
-      step.bot.forEach((line, i) => {
-        setTyping(true);
-        const t1 = setTimeout(() => {
-          setMessages((m) => [
-            ...m,
-            { id: nextId(), role: "bot", text: render(line, currentMode, currentLead) },
-          ]);
-          if (i === step.bot.length - 1) setTyping(false);
-        }, delay + 650);
-        timers.current.push(t1);
-        delay += 650 + Math.min(line.length * 12, 500);
-      });
-    },
-    [],
-  );
+  /**
+   * Apply a snapshot to the UI: emit its bot bubbles one-by-one with a typing
+   * indicator between, update step/lead, and schedule the owner alert.
+   */
+  const playSnapshot = useCallback((snap: FlowSnapshot) => {
+    clearTimers();
+    setStepId(snap.stepId);
+    setLead(snap.lead);
 
-  /** Build the owner-alert panel for a terminal step (spec §3 owner alerts). */
-  const buildOwnerAlert = useCallback(
-    (currentMode: Mode, l: LeadDraft): OwnerAlert => {
-      const priority =
-        l.intent === "distributor" || l.exclusiveRights === "YES";
-      if (currentMode === "factory") {
-        return {
-          priority: false,
-          lines: [
-            `🔔 New Lead — ${DEMO_CLIENT_NAME.factory}`,
-            `Name: ${l.buyerName ?? "—"}`,
-            `Type: ${l.buyerType ?? "—"} | City: ${l.buyerCity ?? "—"}`,
-            `Product: ${l.productCategory ?? "—"} ${l.productSize ?? ""} ${l.productFinish ?? ""}`.trim(),
-            `Volume: ${l.quantity ?? "—"}`,
-            `WhatsApp: +91XXXXXXXXXX`,
-          ],
-        };
-      }
-      if (priority) {
-        return {
-          priority: true,
-          lines: [
-            `🚨 PRIORITY LEAD — ${DEMO_CLIENT_NAME.exporter}`,
-            `Name: ${l.buyerName ?? "—"}`,
-            `Company: ${l.buyerCompany ?? "—"}`,
-            `Country: ${l.distributorCountry ?? l.country ?? "—"}`,
-            `Annual volume: ${l.annualVolume ?? "—"}`,
-            `Exclusive rights: ${l.exclusiveRights ?? "—"}`,
-            `WhatsApp: +000XXXXXXXXXX`,
-            `→ Call within 24 hours`,
-          ],
-        };
-      }
-      return {
-        priority: false,
-        lines: [
-          `🔔 New Export Lead — ${DEMO_CLIENT_NAME.exporter}`,
-          `Name: ${l.buyerName ?? "—"}`,
-          `Company: ${l.buyerCompany ?? "—"}`,
-          `Product: ${l.productCategory ?? l.sampleProduct ?? "—"} ${l.productSize ?? ""}`.trim(),
-          `Quantity: ${l.quantity ?? l.sampleQty ?? "—"}`,
-          `Country: ${l.country ?? "—"} | Terms: ${l.incoterms ?? "—"}`,
-          `WhatsApp: +000XXXXXXXXXX`,
-        ],
-      };
-    },
-    [],
-  );
+    let delay = 0;
+    snap.botMessages.forEach((line, i) => {
+      setTyping(true);
+      const t1 = setTimeout(() => {
+        setMessages((m) => [...m, { id: nextId(), role: "bot", text: line }]);
+        if (i === snap.botMessages.length - 1) setTyping(false);
+      }, delay + 650);
+      timers.current.push(t1);
+      delay += 650 + Math.min(line.length * 12, 500);
+    });
 
-  const goTo = useCallback(
-    (id: typeof stepId, currentMode: Mode, currentLead: LeadDraft) => {
-      const step = STEPS[id];
-      setStepId(id);
-      playStep(step, currentMode, currentLead);
-      if (step.terminal) {
-        const alert = buildOwnerAlert(currentMode, currentLead);
-        const t = setTimeout(() => setOwnerAlert(alert), 1400);
-        timers.current.push(t);
-      }
-    },
-    [playStep, buildOwnerAlert],
-  );
+    if (snap.terminal && snap.ownerAlert) {
+      const alert = snap.ownerAlert;
+      const t = setTimeout(() => setOwnerAlert(alert), 1400);
+      timers.current.push(t);
+    }
+  }, []);
 
   /** Begin (or restart) the conversation for a mode. */
   const start = useCallback(
@@ -138,48 +77,36 @@ export function useChatFlow(initialMode: Mode) {
       clearTimers();
       setMode(m);
       setMessages([]);
-      setLead({});
       setOwnerAlert(null);
-      goTo(ENTRY[m], m, {});
+      playSnapshot(startFlow(m));
     },
-    [goTo],
+    [playSnapshot],
   );
 
   /** User tapped a quick-reply chip. */
   const chooseOption = useCallback(
     (opt: QuickReply) => {
-      const step = STEPS[stepId];
-      const echo = opt.label;
-      const updated: LeadDraft = { ...lead };
-      if (step.field) updated[step.field] = (opt.value ?? opt.label) as never;
-      if (opt.priority) updated.priority = "priority";
-      setLead(updated);
-      setMessages((m) => [...m, { id: nextId(), role: "user", text: echo }]);
-
-      const next = opt.next ?? step.next;
-      if (!next) return;
-      if (next === ENTRY[mode] && step.terminal) {
-        start(mode); // "Start over"
+      setMessages((m) => [...m, { id: nextId(), role: "user", text: opt.label }]);
+      const snap = advanceFlow({ mode, stepId, lead, choiceLabel: opt.label });
+      // "Start over" on a terminal step resets the thread.
+      if (snap.stepId === ENTRY[mode] && STEPS[stepId].terminal) {
+        start(mode);
         return;
       }
-      goTo(next, mode, updated);
+      playSnapshot(snap);
     },
-    [stepId, lead, mode, goTo, start],
+    [stepId, lead, mode, playSnapshot, start],
   );
 
   /** User submitted free text. */
   const submitText = useCallback(
     (value: string) => {
-      const step = STEPS[stepId];
       const trimmed = value.trim();
       if (!trimmed) return;
-      const updated: LeadDraft = { ...lead };
-      if (step.field) updated[step.field] = trimmed as never;
-      setLead(updated);
       setMessages((m) => [...m, { id: nextId(), role: "user", text: trimmed }]);
-      if (step.next) goTo(step.next, mode, updated);
+      playSnapshot(advanceFlow({ mode, stepId, lead, text: trimmed }));
     },
-    [stepId, lead, mode, goTo],
+    [stepId, lead, mode, playSnapshot],
   );
 
   return {
