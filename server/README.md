@@ -2,19 +2,31 @@
 
 Phase 2 backend — a fork of the **clinic-connect** stack adapted to ceramics.
 
-**Built so far (data layer):**
+**Built so far — data layer:**
 - `db.ts` — drizzle client (`db`, `pool`)
 - `middleware/tenant.ts` — tenant context (`currentClientId`, `runWithClient`, …)
 - `utils/encryption.ts` — AES-256-GCM (v2 format) + peppered `hashPhone`
 - `storage.ts` — tenant-scoped CRUD for clients/leads/followups
-- `storage.test.ts` — Vitest integration tests (run `npm run test:server`)
+- `storage.test.ts` — Vitest integration tests
 
+**Built so far — deterministic web chat engine (no OpenAI yet):**
+- `app.ts` — Express app factory (+ JSON 500 handler)
+- `index.ts` — entrypoint (listens on PORT 5000, seeds the demo client)
+- `seed.ts` — idempotent demo `ceramic_clients` row
+- `services/chatSessions.ts` — in-memory session store (30-min TTL)
+- `routes/chat.ts` — `POST /api/chat/session` + `POST /api/chat/message`;
+  persists a lead on terminal, deletes the session to prevent double-insert
+- `routes/chat.test.ts` — HTTP integration tests (Supertest + real DB)
+- Pure flow logic is shared at `../shared/flowEngine.ts` (used by client + server)
+
+Run: `npm run dev:server` (API :5000) alongside `npm run dev` (client :5173).
 Schema lives in `../shared/schema.ts`; migrations in `../migrations/`.
-See the repo-root `CLAUDE.md` → "Phase 2 — built so far" and the plan at
-`../docs/superpowers/plans/2026-05-25-phase2-db-and-storage.md`.
+See the repo-root `CLAUDE.md` → "Phase 2 — built so far" and the plans at
+`../docs/superpowers/plans/`.
 
-**Not built yet (later slices):** Express routes, chat engine/FSM, OpenAI
-prompts/tools, WhatsApp webhook/sender, follow-up scheduler, admin dashboard.
+**Not built yet (later slices):** OpenAI/LLM-driven conversation + tools
+(`save_ceramic_lead`, `notify_owner`, `send_catalog`), WhatsApp webhook/sender,
+follow-up scheduler, admin dashboard.
 
 ## What goes here (Phase 2)
 

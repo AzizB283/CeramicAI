@@ -17,14 +17,17 @@ This project ships in two phases. **Phase 1 is built; Phase 2 is in progress (th
 | Phase | What it is | Stack | Where |
 | --- | --- | --- | --- |
 | **Phase 1 — Web demo (DONE)** | Frontend-only chat simulation to win the first 2–3 clients. No backend, no WhatsApp, no DB. Hardcoded flow graph. | React 18 + Vite + Tailwind | `client/` + `shared/` |
-| **Phase 2 — Real bot (IN PROGRESS)** | Real WhatsApp + web bot, multi-tenant. Forking clinic-connect. **Built so far: DB schema + storage layer.** | Node + Express + Postgres + Drizzle + OpenAI + WhatsApp Cloud API | `server/` + `shared/` |
+| **Phase 2 — Real bot (IN PROGRESS)** | Real WhatsApp + web bot, multi-tenant. Forking clinic-connect. **Built so far: DB + storage layer, and a deterministic web chat engine (demo → real server → DB).** | Node + Express + Postgres + Drizzle + OpenAI + WhatsApp Cloud API | `server/` + `shared/` |
 
-> **Default assumption:** the Phase 1 demo (`client/`) still runs with zero
-> infrastructure — don't break that. Phase 2 work lives in `server/` and the
-> `shared/schema.ts` data layer. Routes, the chat engine, OpenAI, and WhatsApp
-> are **not built yet** — they are later slices. Don't add them speculatively.
+> **Default assumption:** the Phase 1 demo UI (`client/`) is preserved, but it
+> now calls the real server (`/api/chat/*`) when the server is running. Phase 2
+> work lives in `server/` + `shared/`. **OpenAI/LLM and WhatsApp are still NOT
+> built** — the chat is deterministic (replays `shared/flows.ts`). Don't add the
+> LLM or WhatsApp speculatively; they are later slices.
 
-### Phase 2 — built so far (data layer)
+### Phase 2 — built so far
+
+**Data layer**
 - **Schema:** `shared/schema.ts` defines `ceramic_clients` / `ceramic_leads` /
   `ceramic_followups` (spec §5). SQL migration in `migrations/`.
 - **`server/db.ts`** — drizzle client (`db`, `pool`).
@@ -35,19 +38,37 @@ This project ships in two phases. **Phase 1 is built; Phase 2 is in progress (th
 - **`server/storage.ts`** — tenant-scoped CRUD for clients/leads/followups. Every
   scoped query uses `scope()`; every write uses `withClientId()`. Buyer name/phone
   encrypted at rest; `getDueFollowups` is intentionally cross-tenant (scheduler).
-- **Tests:** `server/storage.test.ts` (Vitest integration, incl. multi-mode
-  cross-tenant isolation). 11 tests, run against a real Postgres.
+
+**Web chat engine (deterministic — no OpenAI yet)**
+- **`shared/flowEngine.ts`** — pure flow logic (`startFlow`/`advanceFlow` →
+  `FlowSnapshot`), shared by client + server. **Single source of truth for
+  transitions** — edit flow behavior here, never re-implement it in the client or
+  router. `FlowSnapshot.startOver` signals a "Start over" reset.
+- **`server/services/chatSessions.ts`** — in-memory session store, 30-min TTL.
+- **`server/routes/chat.ts`** — `POST /api/chat/session` + `POST /api/chat/message`.
+  Advances the flow; on a terminal step persists a `ceramic_leads` row (then deletes
+  the session so a replay can't double-insert).
+- **`server/app.ts`** (Express app + JSON 500 handler) + **`server/index.ts`**
+  (listens on PORT 5000, seeds a demo `ceramic_clients` row via `server/seed.ts`).
+- **Client:** `client/src/lib/useChatFlow.ts` now calls `/api/chat/*` (Vite dev
+  proxy forwards `/api` → :5000). The demo UI (`App.tsx`/components) is unchanged.
+
+**Run the full stack (two terminals, from repo root):**
+`npm run dev:server` (API on :5000, seeds the demo client) and `npm run dev`
+(client on :5173, proxies `/api`). Walk the demo → a lead lands in `ceramic_leads`.
 
 **Server commands (from repo root):** `npm run check:server` (typecheck),
-`npm run test:server` (needs `DATABASE_URL`), `npm run db:generate` (new
-migration from schema), `npm run db:push` (apply to DB). Set `DATABASE_URL` and a
-64-hex-char `ENCRYPTION_KEY` in `.env.local` (gitignored) — see `.env.example`.
+`npm run test:server` (Vitest; needs `DATABASE_URL` — runs storage + flowEngine +
+session + chat-HTTP tests), `npm run db:generate` / `npm run db:push`. Set
+`DATABASE_URL` and a 64-hex-char `ENCRYPTION_KEY` in `.env.local` (gitignored) —
+see `.env.example`.
 
 **Tenancy model:** `TENANT_MODE=single` (default) leaves reads unscoped (one
 client). `TENANT_MODE=multi` enforces `scope()`/`withClientId()` — every storage
 call must run inside `runWithClient(clientId, fn)` or it throws.
 
-**Plan:** `docs/superpowers/plans/2026-05-25-phase2-db-and-storage.md`.
+**Plans:** `docs/superpowers/plans/2026-05-25-phase2-db-and-storage.md`,
+`docs/superpowers/plans/2026-05-25-phase2-web-chat-engine.md`.
 
 ---
 
