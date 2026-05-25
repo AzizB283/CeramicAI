@@ -14,7 +14,7 @@
     "build": "npm run build --workspace client",
     "preview": "npm run preview --workspace client",
     "check": "npm run check --workspace client",
-    "dev:server": "tsx watch server/index.ts",
+    "dev:server": "tsx watch --env-file-if-exists=.env --env-file-if-exists=.env.local --tsconfig server/tsconfig.json server/index.ts",
     "check:server": "npm run check --workspace server",
     "test:server": "npm run test --workspace server",
     "db:generate": "drizzle-kit generate",
