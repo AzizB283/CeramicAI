@@ -28,6 +28,8 @@ export interface FlowSnapshot {
   catalog?: "factory" | "export";
   terminal: boolean;
   ownerAlert: OwnerAlert | null;
+  /** Set when advanceFlow took the "Start over" path; tells the caller to reset. */
+  startOver: boolean;
 }
 
 export interface AdvanceInput {
@@ -96,12 +98,13 @@ function snapshot(mode: Mode, stepId: StepId, lead: LeadDraft): FlowSnapshot {
     stepId,
     lead,
     botMessages: step.bot.map((line) => render(line, mode, lead)),
-    quickReplies: step.options ?? [],
+    quickReplies: step.options ? [...step.options] : [],
     inputKind: step.input === "text" ? "text" : "choice",
     placeholder: step.placeholder,
     catalog: step.catalog,
     terminal: !!step.terminal,
     ownerAlert: step.terminal ? buildOwnerAlert(mode, lead) : null,
+    startOver: false,
   };
 }
 
@@ -127,7 +130,8 @@ export function advanceFlow(input: AdvanceInput): FlowSnapshot {
     if (opt.priority) lead.priority = "priority";
     const next = opt.next ?? step.next;
     if (!next) return snapshot(mode, stepId, lead);
-    if (next === ENTRY[mode] && step.terminal) return startFlow(mode);
+    if (next === ENTRY[mode] && step.terminal)
+      return { ...startFlow(mode), startOver: true };
     return snapshot(mode, next, lead);
   }
 

@@ -86,13 +86,14 @@ export function useChatFlow(initialMode: Mode) {
   /** User tapped a quick-reply chip. */
   const chooseOption = useCallback(
     (opt: QuickReply) => {
-      setMessages((m) => [...m, { id: nextId(), role: "user", text: opt.label }]);
       const snap = advanceFlow({ mode, stepId, lead, choiceLabel: opt.label });
-      // "Start over" on a terminal step resets the thread.
-      if (snap.stepId === ENTRY[mode] && STEPS[stepId].terminal) {
+      // "Start over": advanceFlow signals a reset via snap.startOver. Reset the
+      // thread (start() wipes messages/lead/ownerAlert) without echoing the chip.
+      if (snap.startOver) {
         start(mode);
         return;
       }
+      setMessages((m) => [...m, { id: nextId(), role: "user", text: opt.label }]);
       playSnapshot(snap);
     },
     [stepId, lead, mode, playSnapshot, start],
