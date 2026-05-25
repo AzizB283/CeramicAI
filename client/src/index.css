@@ -3,6 +3,78 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * shadcn/ui design tokens mapped onto the Aurex Auto brand palette.
+   * Primary = coral (#e85d04 ≈ hsl(24 96% 46%)). Background = cream.
+   * Used by every component in components/ui/*.
+   */
+  :root {
+    --background: 39 56% 94%; /* cream #faf3e7 */
+    --foreground: 0 0% 17%; /* ink #2b2b2b */
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 17%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 17%;
+    --primary: 24 96% 46%; /* coral #e85d04 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 39 45% 90%; /* cream-deep */
+    --secondary-foreground: 0 0% 17%;
+    --muted: 39 40% 90%;
+    --muted-foreground: 0 0% 40%;
+    --accent: 24 95% 56%; /* coral-light */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 30 20% 85%;
+    --input: 30 20% 85%;
+    --ring: 24 96% 46%;
+    --radius: 0.75rem;
+    --chart-1: 24 96% 46%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 142 71% 45%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 0 72% 51%;
+    /* sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 17%;
+    --sidebar-primary: 24 96% 46%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 39 45% 92%;
+    --sidebar-accent-foreground: 0 0% 17%;
+    --sidebar-border: 30 20% 88%;
+    --sidebar-ring: 24 96% 46%;
+  }
+
+  .dark {
+    --background: 0 0% 12%;
+    --foreground: 39 30% 92%;
+    --card: 0 0% 16%;
+    --card-foreground: 39 30% 92%;
+    --popover: 0 0% 16%;
+    --popover-foreground: 39 30% 92%;
+    --primary: 24 96% 52%; /* coral, slightly brighter on dark */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 22%;
+    --secondary-foreground: 39 30% 92%;
+    --muted: 0 0% 22%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 24 95% 56%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 26%;
+    --input: 0 0% 26%;
+    --ring: 24 96% 52%;
+    --sidebar-background: 0 0% 14%;
+    --sidebar-foreground: 39 30% 92%;
+    --sidebar-primary: 24 96% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 22%;
+    --sidebar-accent-foreground: 39 30% 92%;
+    --sidebar-border: 0 0% 24%;
+    --sidebar-ring: 24 96% 52%;
+  }
+
   html,
   body,
   #root {

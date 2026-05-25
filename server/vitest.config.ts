@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     environment: "node",
     setupFiles: ["./test/setup.ts"],
-    include: ["**/*.test.ts"],
+    include: ["**/*.test.ts", "../shared/**/*.test.ts"],
     fileParallelism: false, // share one DB; avoid cross-test races
   },
 });
