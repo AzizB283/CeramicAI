@@ -17,7 +17,13 @@
     "dev:server": "tsx watch server/index.ts",
     "check:server": "npm run check --workspace server",
     "test:server": "npm run test --workspace server",
-    "db:generate": "npm run db:generate --workspace server",
-    "db:push": "npm run db:push --workspace server"
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.8",
+    "drizzle-orm": "^0.39.3",
+    "drizzle-zod": "^0.7.1",
+    "dotenv": "^17.3.1"
   }
 }

@@ -6,9 +6,7 @@
   "scripts": {
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "drizzle-orm": "^0.39.3",
