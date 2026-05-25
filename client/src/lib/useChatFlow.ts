@@ -75,12 +75,22 @@ export function useChatFlow(initialMode: Mode) {
     setStep(stepFromSnapshot(snap));
     setLead(snap.lead);
 
+    // Fix 2: hoist setTyping(true) out of the loop so the indicator appears
+    // immediately, before the first bubble's setTimeout fires. If there are no
+    // messages (edge case) resolve to false right away so typing never sticks.
+    if (snap.botMessages.length === 0) {
+      setTyping(false);
+      return;
+    }
+
+    setTyping(true);
+
     let delay = 0;
+    const last = snap.botMessages.length - 1;
     snap.botMessages.forEach((line, i) => {
-      setTyping(true);
       const t1 = setTimeout(() => {
         pushBot(line);
-        if (i === snap.botMessages.length - 1) setTyping(false);
+        if (i === last) setTyping(false);
       }, delay + 650);
       timers.current.push(t1);
       delay += 650 + Math.min(line.length * 12, 500);
@@ -93,6 +103,17 @@ export function useChatFlow(initialMode: Mode) {
     }
   }, []);
 
+  // Fix 3: shared helper that POSTs to /api/chat/message and returns the snapshot.
+  const postMessage = useCallback(async (body: object): Promise<FlowSnapshot> => {
+    const res = await fetch("/api/chat/message", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`message failed: ${res.status}`);
+    return (await res.json()) as FlowSnapshot;
+  }, []);
+
   /** Begin (or restart) the conversation for a mode. */
   const start = useCallback(
     async (m: Mode) => {
@@ -100,6 +121,9 @@ export function useChatFlow(initialMode: Mode) {
       setMode(m);
       setMessages([]);
       setOwnerAlert(null);
+      // Fix 4: reset step/lead before the fetch so stale values don't linger.
+      setStep(EMPTY_STEP);
+      setLead({});
       setTyping(true);
       try {
         const res = await fetch("/api/chat/session", {
@@ -124,17 +148,14 @@ export function useChatFlow(initialMode: Mode) {
     async (opt: QuickReply) => {
       const sid = sessionId.current;
       if (!sid) return;
+      // Fix 1: set typing=true synchronously before the async fetch so chips are
+      // hidden immediately, preventing a racing second submit.
+      setTyping(true);
       // Optimistically echo the chip. On a "Start over" reset the server resets
       // the thread, and start() wipes messages — so the echo never lingers.
       pushUser(opt.label);
       try {
-        const res = await fetch("/api/chat/message", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId: sid, choiceLabel: opt.label }),
-        });
-        if (!res.ok) throw new Error(`message failed: ${res.status}`);
-        const snap = (await res.json()) as FlowSnapshot;
+        const snap = await postMessage({ sessionId: sid, choiceLabel: opt.label });
         if (snap.startOver) {
           await start(mode);
           return;
@@ -145,7 +166,7 @@ export function useChatFlow(initialMode: Mode) {
         pushBot("Sorry, something went wrong.");
       }
     },
-    [mode, playSnapshot, start],
+    [mode, playSnapshot, postMessage, start],
   );
 
   /** User submitted free text. */
@@ -154,22 +175,19 @@ export function useChatFlow(initialMode: Mode) {
       const trimmed = value.trim();
       const sid = sessionId.current;
       if (!trimmed || !sid) return;
+      // Fix 1: set typing=true synchronously before the async fetch so the input
+      // area is replaced with the typing banner, preventing a racing second submit.
+      setTyping(true);
       pushUser(trimmed);
       try {
-        const res = await fetch("/api/chat/message", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId: sid, text: trimmed }),
-        });
-        if (!res.ok) throw new Error(`message failed: ${res.status}`);
-        const snap = (await res.json()) as FlowSnapshot;
+        const snap = await postMessage({ sessionId: sid, text: trimmed });
         playSnapshot(snap);
       } catch {
         setTyping(false);
         pushBot("Sorry, something went wrong.");
       }
     },
-    [playSnapshot],
+    [playSnapshot, postMessage],
   );
 
   return {
