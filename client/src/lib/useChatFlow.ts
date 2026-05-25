@@ -5,59 +5,81 @@ import type {
   Mode,
   QuickReply,
 } from "@shared/types";
-import { ENTRY, STEPS } from "@shared/flows";
-import {
-  advanceFlow,
-  startFlow,
-  type FlowSnapshot,
-  type OwnerAlert,
-} from "@shared/flowEngine";
+import type { FlowSnapshot, OwnerAlert } from "@shared/flowEngine";
 
 export type { OwnerAlert };
 
 let msgSeq = 0;
 const nextId = () => `m${++msgSeq}`;
 
+/** The /session response is a snapshot plus the new session id. */
+type SessionResponse = FlowSnapshot & { sessionId: string };
+
+/** The slice of a snapshot that App.tsx reads off `step`. */
+interface Step {
+  input: "choice" | "text";
+  options: QuickReply[];
+  placeholder?: string;
+  catalog?: "factory" | "export";
+}
+
+const EMPTY_STEP: Step = { input: "choice", options: [] };
+
+const stepFromSnapshot = (snap: FlowSnapshot): Step => ({
+  input: snap.inputKind,
+  options: snap.quickReplies,
+  placeholder: snap.placeholder,
+  catalog: snap.catalog,
+});
+
 /**
  * Drives the demo conversation: holds the message thread, the current step,
  * the accumulated lead, typing state, and the simulated owner alert.
  *
- * The pure flow logic (which step is next, what lead field to set, placeholder
- * rendering, owner-alert payload) lives in `@shared/flowEngine` so the Phase 2
- * server shares it. This hook only owns the UI concerns: the message thread,
- * the typing-dots timers, and mapping snapshots to bubbles.
+ * Phase 2: the conversation is owned by the server. This hook calls
+ * `POST /api/chat/session` to begin and `POST /api/chat/message` to advance,
+ * then animates the returned snapshot. It no longer walks the flow locally —
+ * the server decides the next step, renders the bot copy, and persists the lead.
  *
- * In Phase 2 this hook is replaced by calls to POST /api/chat/message, but the
- * message/lead shapes stay the same (they live in @shared).
+ * This hook only owns the UI concerns: the message thread, the typing-dots
+ * timers, and mapping server snapshots to bubbles.
  */
 export function useChatFlow(initialMode: Mode) {
   const [mode, setMode] = useState<Mode>(initialMode);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [stepId, setStepId] = useState(ENTRY[initialMode]);
+  const [step, setStep] = useState<Step>(EMPTY_STEP);
   const [lead, setLead] = useState<LeadDraft>({});
   const [typing, setTyping] = useState(false);
   const [ownerAlert, setOwnerAlert] = useState<OwnerAlert | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const sessionId = useRef<string | null>(null);
 
   const clearTimers = () => {
     timers.current.forEach(clearTimeout);
     timers.current = [];
   };
 
+  const pushBot = (text: string) =>
+    setMessages((m) => [...m, { id: nextId(), role: "bot", text }]);
+  const pushUser = (text: string) =>
+    setMessages((m) => [...m, { id: nextId(), role: "user", text }]);
+
   /**
-   * Apply a snapshot to the UI: emit its bot bubbles one-by-one with a typing
-   * indicator between, update step/lead, and schedule the owner alert.
+   * Apply a server snapshot to the UI: emit its (already-rendered) bot bubbles
+   * one-by-one with a typing indicator between, update step/lead, and schedule
+   * the owner alert. The server renders {client}/{name}, so bubbles are shown
+   * verbatim.
    */
   const playSnapshot = useCallback((snap: FlowSnapshot) => {
     clearTimers();
-    setStepId(snap.stepId);
+    setStep(stepFromSnapshot(snap));
     setLead(snap.lead);
 
     let delay = 0;
     snap.botMessages.forEach((line, i) => {
       setTyping(true);
       const t1 = setTimeout(() => {
-        setMessages((m) => [...m, { id: nextId(), role: "bot", text: line }]);
+        pushBot(line);
         if (i === snap.botMessages.length - 1) setTyping(false);
       }, delay + 650);
       timers.current.push(t1);
@@ -73,47 +95,87 @@ export function useChatFlow(initialMode: Mode) {
 
   /** Begin (or restart) the conversation for a mode. */
   const start = useCallback(
-    (m: Mode) => {
+    async (m: Mode) => {
       clearTimers();
       setMode(m);
       setMessages([]);
       setOwnerAlert(null);
-      playSnapshot(startFlow(m));
+      setTyping(true);
+      try {
+        const res = await fetch("/api/chat/session", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mode: m }),
+        });
+        if (!res.ok) throw new Error(`session failed: ${res.status}`);
+        const data = (await res.json()) as SessionResponse;
+        sessionId.current = data.sessionId;
+        playSnapshot(data);
+      } catch {
+        setTyping(false);
+        pushBot("Sorry, something went wrong.");
+      }
     },
     [playSnapshot],
   );
 
   /** User tapped a quick-reply chip. */
   const chooseOption = useCallback(
-    (opt: QuickReply) => {
-      const snap = advanceFlow({ mode, stepId, lead, choiceLabel: opt.label });
-      // "Start over": advanceFlow signals a reset via snap.startOver. Reset the
-      // thread (start() wipes messages/lead/ownerAlert) without echoing the chip.
-      if (snap.startOver) {
-        start(mode);
-        return;
+    async (opt: QuickReply) => {
+      const sid = sessionId.current;
+      if (!sid) return;
+      // Optimistically echo the chip. On a "Start over" reset the server resets
+      // the thread, and start() wipes messages — so the echo never lingers.
+      pushUser(opt.label);
+      try {
+        const res = await fetch("/api/chat/message", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId: sid, choiceLabel: opt.label }),
+        });
+        if (!res.ok) throw new Error(`message failed: ${res.status}`);
+        const snap = (await res.json()) as FlowSnapshot;
+        if (snap.startOver) {
+          await start(mode);
+          return;
+        }
+        playSnapshot(snap);
+      } catch {
+        setTyping(false);
+        pushBot("Sorry, something went wrong.");
       }
-      setMessages((m) => [...m, { id: nextId(), role: "user", text: opt.label }]);
-      playSnapshot(snap);
     },
-    [stepId, lead, mode, playSnapshot, start],
+    [mode, playSnapshot, start],
   );
 
   /** User submitted free text. */
   const submitText = useCallback(
-    (value: string) => {
+    async (value: string) => {
       const trimmed = value.trim();
-      if (!trimmed) return;
-      setMessages((m) => [...m, { id: nextId(), role: "user", text: trimmed }]);
-      playSnapshot(advanceFlow({ mode, stepId, lead, text: trimmed }));
+      const sid = sessionId.current;
+      if (!trimmed || !sid) return;
+      pushUser(trimmed);
+      try {
+        const res = await fetch("/api/chat/message", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId: sid, text: trimmed }),
+        });
+        if (!res.ok) throw new Error(`message failed: ${res.status}`);
+        const snap = (await res.json()) as FlowSnapshot;
+        playSnapshot(snap);
+      } catch {
+        setTyping(false);
+        pushBot("Sorry, something went wrong.");
+      }
     },
-    [stepId, lead, mode, playSnapshot],
+    [playSnapshot],
   );
 
   return {
     mode,
     messages,
-    step: STEPS[stepId],
+    step,
     lead,
     typing,
     ownerAlert,
