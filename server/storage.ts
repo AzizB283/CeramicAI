@@ -89,6 +89,19 @@ export const storage = {
     return row;
   },
 
+  // Update a client by id (single-tenant: the demo client is the only one).
+  // Scoped by id like getClient — no tenant predicate, since the caller
+  // already resolves the id via ensureDemoClient/getClient.
+  async updateClient(id: string, patch: Partial<InsertCeramicClient>): Promise<CeramicClient> {
+    const [row] = await db
+      .update(ceramicClients)
+      .set(patch)
+      .where(eq(ceramicClients.id, id))
+      .returning();
+    if (!row) throw new Error(`Client ${id} not found`);
+    return row;
+  },
+
   // leads
   async createLead(input: InsertCeramicLead): Promise<CeramicLead> {
     const [row] = await db
