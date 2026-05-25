@@ -12,7 +12,7 @@ import {
   type CeramicFollowup,
   type InsertCeramicFollowup,
 } from "@shared/schema";
-import { encrypt, decrypt, hashPhone } from "./utils/encryption";
+import { encrypt, decrypt, isEncrypted, hashPhone } from "./utils/encryption";
 
 // ── tenant scoping (ported from clinic-connect) ─────────────────────────
 function scope(column: any): SQL | undefined {
@@ -24,10 +24,12 @@ function scope(column: any): SQL | undefined {
         "Wrap the caller in runWithClient(clientId, () => { ... }).",
     );
   }
+  // single mode: no predicate; drizzle's and() drops undefined args, so the
+  // query spans all rows (acceptable — one tenant by definition in single mode).
   return undefined;
 }
 
-function withClientId<T extends Record<string, any>>(values: T): T & { clientId?: string } {
+function withClientId<T extends Record<string, any>>(values: T): T & { clientId: string } {
   const cid = currentClientId();
   if (cid) return { ...values, clientId: cid };
   if (getTenantMode() === "multi") {
@@ -36,7 +38,10 @@ function withClientId<T extends Record<string, any>>(values: T): T & { clientId?
         "Wrap the caller in runWithClient(clientId, () => { ... }).",
     );
   }
-  return values; // single mode: NOT NULL client_id is the DB safety net
+  // single mode: clientId is intentionally omitted here; the NOT NULL client_id
+  // column is the DB safety net. The cast restores the declared return type so
+  // callers can rely on it, without weakening the rest of the insert object.
+  return values as T & { clientId: string };
 }
 
 // ── PII encrypt/decrypt for leads ───────────────────────────────────────
@@ -52,11 +57,18 @@ function encryptLeadFields<T extends Partial<InsertCeramicLead>>(
   return out;
 }
 
+// Tolerate legacy/plaintext values; only attempt decrypt on our v2 ciphertext.
+// (Tampered ciphertext — isEncrypted true but bad tag — still throws, which is correct.)
+function safeDecrypt(value: string | null): string | null {
+  if (!value) return value;
+  return isEncrypted(value) ? decrypt(value) : value;
+}
+
 function decryptLead(row: CeramicLead): CeramicLead {
   return {
     ...row,
-    buyerName: row.buyerName ? decrypt(row.buyerName) : row.buyerName,
-    buyerPhone: row.buyerPhone ? decrypt(row.buyerPhone) : row.buyerPhone,
+    buyerName: safeDecrypt(row.buyerName),
+    buyerPhone: safeDecrypt(row.buyerPhone),
   };
 }
 
@@ -81,7 +93,7 @@ export const storage = {
   async createLead(input: InsertCeramicLead): Promise<CeramicLead> {
     const [row] = await db
       .insert(ceramicLeads)
-      .values(withClientId(encryptLeadFields(input)) as any)
+      .values(withClientId(encryptLeadFields(input)) as typeof ceramicLeads.$inferInsert)
       .returning();
     return decryptLead(row);
   },
@@ -135,7 +147,7 @@ export const storage = {
   async createFollowup(input: InsertCeramicFollowup): Promise<CeramicFollowup> {
     const [row] = await db
       .insert(ceramicFollowups)
-      .values(withClientId(input) as any)
+      .values(withClientId(input) as typeof ceramicFollowups.$inferInsert)
       .returning();
     return row;
   },

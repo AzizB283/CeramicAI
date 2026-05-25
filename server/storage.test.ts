@@ -122,3 +122,70 @@ describe("followup storage", () => {
     expect(due.some((f) => f.leadId === lead.id)).toBe(true);
   });
 });
+
+// Cross-tenant isolation only holds in MULTI mode: in single mode scope()
+// returns undefined and reads are intentionally unscoped (one tenant by
+// definition), so these assertions would fail. We force multi mode for this
+// block only and restore the prior value afterwards. getTenantMode() reads
+// process.env at call time, so overriding the env var is enough.
+describe("cross-tenant isolation (multi mode)", () => {
+  let prevTenantMode: string | undefined;
+  let clientA: CeramicClient;
+  let clientB: CeramicClient;
+  let bLead: Awaited<ReturnType<typeof storage.createLead>>;
+
+  beforeAll(async () => {
+    prevTenantMode = process.env.TENANT_MODE;
+    process.env.TENANT_MODE = "multi";
+
+    // createClient runs outside any tenant context and does not use
+    // withClientId, so creating both tenants directly works in multi mode.
+    clientA = await storage.createClient({
+      name: "Tenant A",
+      mode: "factory",
+      ownerName: "Owner A",
+      ownerWhatsapp: "+911111111111",
+    });
+    clientB = await storage.createClient({
+      name: "Tenant B",
+      mode: "factory",
+      ownerName: "Owner B",
+      ownerWhatsapp: "+922222222222",
+    });
+
+    bLead = await runWithClient(clientB.id, () =>
+      storage.createLead({
+        sessionId: "b-lead",
+        buyerName: "B Buyer",
+        buyerPhone: "+255700000000",
+      }),
+    );
+  });
+
+  afterAll(async () => {
+    // Clean up B's lead + both client rows. Do NOT call pool.end() here —
+    // the top-level afterAll owns the pool lifecycle.
+    await runWithClient(clientB.id, () => storage.deleteLead(bLead.id));
+    await pool.query("DELETE FROM ceramic_clients WHERE id = ANY($1)", [
+      [clientA.id, clientB.id],
+    ]);
+    process.env.TENANT_MODE = prevTenantMode;
+  });
+
+  it("getLead does not return another tenant's row", async () => {
+    const found = await runWithClient(clientA.id, () => storage.getLead(bLead.id));
+    expect(found).toBeUndefined();
+  });
+
+  it("getLeadByPhone does not return another tenant's row", async () => {
+    const found = await runWithClient(clientA.id, () =>
+      storage.getLeadByPhone("+255700000000"),
+    );
+    expect(found).toBeUndefined();
+  });
+
+  it("getLeads excludes another tenant's rows", async () => {
+    const leads = await runWithClient(clientA.id, () => storage.getLeads());
+    expect(leads.some((l) => l.id === bLead.id)).toBe(false);
+  });
+});
