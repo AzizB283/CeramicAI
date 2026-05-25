@@ -131,13 +131,16 @@ export const storage = {
       .set(encryptLeadFields(patch))
       .where(and(eq(ceramicLeads.id, id), scope(ceramicLeads.clientId)))
       .returning();
+    if (!row) throw new Error(`Lead ${id} not found in current tenant`);
     return decryptLead(row);
   },
 
   async deleteLead(id: number): Promise<void> {
+    // Scope the followup delete by clientId too, so a guessed leadId can't
+    // wipe another tenant's followups in multi mode.
     await db
       .delete(ceramicFollowups)
-      .where(eq(ceramicFollowups.leadId, id));
+      .where(and(eq(ceramicFollowups.leadId, id), scope(ceramicFollowups.clientId)));
     await db
       .delete(ceramicLeads)
       .where(and(eq(ceramicLeads.id, id), scope(ceramicLeads.clientId)));
