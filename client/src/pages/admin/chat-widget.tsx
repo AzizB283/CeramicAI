@@ -60,7 +60,7 @@ export default function AdminChatWidget() {
                 <CardDescription>How the chat widget will appear on your website</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="h-[560px] border rounded-lg overflow-hidden">
+                <div className="h-[680px] border rounded-lg overflow-y-auto">
                   <DemoChat />
                 </div>
               </CardContent>

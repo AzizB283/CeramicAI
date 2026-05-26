@@ -85,7 +85,7 @@ export default function DemoChat() {
         {/* Thread */}
         <div
           ref={threadRef}
-          className="scrollbar-thin flex h-[58vh] flex-col gap-3 overflow-y-auto px-4 py-4"
+          className="scrollbar-thin flex h-[clamp(340px,55vh,500px)] flex-col gap-3 overflow-y-auto px-4 py-4"
         >
           {chat.messages.map((m) => (
             <MessageBubble key={m.id} message={m} />
