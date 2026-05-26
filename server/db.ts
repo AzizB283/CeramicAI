@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import * as schema from "@shared/schema";
 
 const { Pool } = pg;
@@ -25,11 +26,17 @@ export const db = drizzle(pool, { schema });
  * and the bundled CJS (dist/server.cjs → ../migrations).
  */
 export async function runMigrations(): Promise<void> {
-  // `__dirname` is defined under tsx (CJS shim) and the bundled CJS alike,
-  // so this resolves to <repoRoot>/migrations in both contexts: dev (tsx
-  // running server/db.ts → server/.. = repo root) and prod (bundle at
-  // dist/server.cjs → dist/.. = repo root).
-  const migrationsFolder = path.resolve(__dirname, "..", "migrations");
+  // Resolve the migrations folder to <repoRoot>/migrations in both runtime
+  // contexts:
+  //   - dev (tsx in ESM mode): __dirname is NOT defined; derive from
+  //     import.meta.url. server/db.ts → server/.. = repo root.
+  //   - prod (bundled CJS): __dirname IS defined; import.meta.url isn't.
+  //     dist/server.cjs → dist/.. = repo root.
+  const here =
+    typeof __dirname !== "undefined"
+      ? __dirname
+      : path.dirname(fileURLToPath(import.meta.url));
+  const migrationsFolder = path.resolve(here, "..", "migrations");
   console.log(`[db] applying migrations from ${migrationsFolder}…`);
   await migrate(db, { migrationsFolder });
   console.log("[db] migrations up to date");

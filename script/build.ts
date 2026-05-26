@@ -79,6 +79,10 @@ async function main() {
     external: externals,
     sourcemap: false,
     logLevel: "info",
+    // The ESM source uses `import.meta.url` only as a fallback when
+    // `__dirname` is undefined — in the bundled CJS, __dirname is always
+    // defined, so the URL branch is dead code. Silence the warning.
+    logOverride: { "empty-import-meta": "silent" },
     // Resolve @shared/* (the path alias) to ../shared at build time.
     alias: {
       "@shared": resolve(repoRoot, "shared"),

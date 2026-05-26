@@ -2,12 +2,22 @@ import { Router } from "express";
 import type { Mode, LeadDraft } from "@shared/types";
 import type { InsertCeramicLead } from "@shared/schema";
 import { startFlow, advanceFlow, type FlowSnapshot } from "@shared/flowEngine";
-import { createSession, getSession, setSession, deleteSession } from "../services/chatSessions";
+import {
+  createSession,
+  getSession,
+  setSession,
+  deleteSession,
+  appendHistory,
+} from "../services/chatSessions";
 import { ensureDemoClient } from "../seed";
 import { runWithClient } from "../middleware/tenant";
 import { storage } from "../storage";
 import { answerSideQuestion } from "../services/openaiAsk";
 import { pickCatalogue } from "../services/catalogueMatcher";
+import {
+  generateBotReply,
+  type ChatHistoryTurn,
+} from "../services/openaiChat";
 
 function buildLeadInsert(sessionId: string, l: LeadDraft): InsertCeramicLead {
   return {
@@ -51,14 +61,61 @@ async function attachCatalogueUrl(snap: FlowSnapshot, mode: Mode): Promise<FlowS
   return catalogUrl ? { ...snap, catalogUrl } : snap;
 }
 
+/**
+ * Replace the snapshot's deterministic `botMessages` with LLM-generated
+ * narration for the current step. Falls back to the deterministic copy when
+ * OpenAI is unavailable or errors — the demo never breaks because of the LLM.
+ *
+ * Called AFTER attachCatalogueUrl so the LLM can mention the catalogue link
+ * naturally on catalog steps.
+ */
+async function narrateSnapshot(
+  snap: FlowSnapshot,
+  mode: Mode,
+  history: ChatHistoryTurn[],
+  factoryName: string,
+): Promise<FlowSnapshot> {
+  const bubbles = await generateBotReply({
+    mode,
+    stepId: snap.stepId,
+    factoryName,
+    lead: snap.lead,
+    quickReplies: snap.quickReplies,
+    history,
+    fallback: snap.botMessages, // already placeholder-rendered by the engine
+    catalogUrl: snap.catalogUrl,
+  });
+  return { ...snap, botMessages: bubbles };
+}
+
+async function resolveFactoryName(): Promise<string> {
+  const clientId = await ensureDemoClient();
+  const client = await storage.getClient(clientId);
+  return client?.name ?? "Shree Tiles Pvt Ltd";
+}
+
 export const chatRouter = Router();
 
 // POST /api/chat/session  { mode } → { sessionId, ...snapshot }
 chatRouter.post("/session", async (req, res) => {
   const mode: Mode = req.body?.mode === "exporter" ? "exporter" : "factory";
-  const snap = await attachCatalogueUrl(startFlow(mode), mode);
-  const session = createSession({ mode, stepId: snap.stepId, lead: snap.lead });
-  res.json({ sessionId: session.id, ...snap });
+  const factoryName = await resolveFactoryName();
+
+  const initial = await attachCatalogueUrl(startFlow(mode), mode);
+  // Fresh session has no history — the welcome turn is bot-only.
+  const narrated = await narrateSnapshot(initial, mode, [], factoryName);
+
+  const session = createSession({
+    mode,
+    stepId: narrated.stepId,
+    lead: narrated.lead,
+  });
+  // Seed the session's history with the welcome bot turn(s).
+  for (const text of narrated.botMessages) {
+    appendHistory(session.id, { role: "bot", text });
+  }
+
+  res.json({ sessionId: session.id, ...narrated });
 });
 
 // POST /api/chat/message  { sessionId, choiceLabel?, text? } → snapshot
@@ -70,29 +127,57 @@ chatRouter.post("/message", async (req, res) => {
   if (text !== undefined && typeof text !== "string")
     return res.status(400).json({ error: "text must be a string" });
 
-  const snap = await attachCatalogueUrl(
-    advanceFlow({
-      mode: session.mode,
-      stepId: session.stepId,
-      lead: session.lead,
-      choiceLabel,
-      text,
-    }),
-    session.mode,
-  );
+  // Record the buyer's turn in history BEFORE the LLM call so the LLM can
+  // see the chip/text they just chose. choiceLabel is the chip text; text is
+  // typed input. Either way, one is set or the request would be a no-op.
+  const userTurnText = (text ?? choiceLabel ?? "").toString().trim();
+  if (userTurnText) appendHistory(sessionId, { role: "user", text: userTurnText });
 
-  setSession(sessionId, { mode: session.mode, stepId: snap.stepId, lead: snap.lead });
+  const advanced = advanceFlow({
+    mode: session.mode,
+    stepId: session.stepId,
+    lead: session.lead,
+    choiceLabel,
+    text,
+  });
+
+  // "Start over": treat as a fresh welcome — re-narrate from scratch with no
+  // history. The session itself is being reset to the entry step by the
+  // engine, so the FSM/lead state is already clean.
+  const isReset = advanced.startOver;
+  const snap = await attachCatalogueUrl(advanced, session.mode);
+  const factoryName = await resolveFactoryName();
+
+  const historyForLLM: ChatHistoryTurn[] = isReset
+    ? []
+    : getSession(sessionId)?.history ?? [];
+  const narrated = await narrateSnapshot(snap, session.mode, historyForLLM, factoryName);
+
+  setSession(sessionId, {
+    mode: session.mode,
+    stepId: narrated.stepId,
+    lead: narrated.lead,
+  });
+
+  // Record the bot's reply in history. If the session is about to be deleted
+  // (terminal, non-restart), we still append for symmetry — the
+  // deleteSession below will drop the whole record together.
+  for (const bubble of narrated.botMessages) {
+    appendHistory(sessionId, { role: "bot", text: bubble });
+  }
 
   // Persist the captured lead once, on a terminal step that is NOT a "Start over" reset.
-  if (snap.terminal && !snap.startOver) {
+  if (narrated.terminal && !narrated.startOver) {
     const clientId = await ensureDemoClient();
-    await runWithClient(clientId, () => storage.createLead(buildLeadInsert(sessionId, snap.lead)));
+    await runWithClient(clientId, () =>
+      storage.createLead(buildLeadInsert(sessionId, narrated.lead)),
+    );
     // Delete the session post-persist so a terminal replay (retry/double-submit)
     // gets a clean 404 instead of re-inserting the same lead (sessionId is not unique).
     deleteSession(sessionId);
   }
 
-  return res.json(snap);
+  return res.json(narrated);
 });
 
 // POST /api/chat/ask  { sessionId, question } → { answer }
@@ -106,10 +191,12 @@ chatRouter.post("/ask", async (req, res) => {
   const session = sessionId ? getSession(sessionId) : undefined;
   if (!session) return res.status(404).json({ error: "session not found or expired" });
 
-  const clientId = await ensureDemoClient();
-  const client = await storage.getClient(clientId);
-  const factoryName = client?.name ?? "Shree Tiles Pvt Ltd";
-
+  const factoryName = await resolveFactoryName();
   const answer = await answerSideQuestion(question.trim(), session.mode, factoryName);
+
+  // Record both turns so future LLM calls see the side-question context.
+  appendHistory(sessionId, { role: "user", text: question.trim() });
+  appendHistory(sessionId, { role: "bot", text: answer });
+
   return res.json({ answer });
 });

@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createSession, getSession, setSession, deleteSession } from "./chatSessions";
+import {
+  createSession,
+  getSession,
+  setSession,
+  deleteSession,
+  appendHistory,
+} from "./chatSessions";
 
 describe("chatSessions", () => {
   beforeEach(() => vi.useFakeTimers());
@@ -30,5 +36,29 @@ describe("chatSessions", () => {
     const s = createSession({ mode: "exporter", stepId: "x_welcome", lead: {} });
     deleteSession(s.id);
     expect(getSession(s.id)).toBeUndefined();
+  });
+
+  it("appendHistory accumulates turns and caps the buffer", () => {
+    const s = createSession({ mode: "factory", stepId: "f_welcome", lead: {} });
+    appendHistory(s.id, { role: "bot", text: "Welcome!" });
+    appendHistory(s.id, { role: "user", text: "I'm a retailer" });
+    const got = getSession(s.id);
+    expect(got?.history).toEqual([
+      { role: "bot", text: "Welcome!" },
+      { role: "user", text: "I'm a retailer" },
+    ]);
+
+    // Push past the cap (MAX_HISTORY = 24) — should keep only the newest 24.
+    for (let i = 0; i < 30; i++) {
+      appendHistory(s.id, { role: "bot", text: `msg ${i}` });
+    }
+    const after = getSession(s.id);
+    expect(after?.history.length).toBe(24);
+    expect(after?.history[0]?.text).toBe("msg 6"); // 0..5 dropped
+    expect(after?.history.at(-1)?.text).toBe("msg 29");
+  });
+
+  it("appendHistory on a missing session is a no-op (no throw)", () => {
+    expect(() => appendHistory("nope", { role: "user", text: "hi" })).not.toThrow();
   });
 });
