@@ -40,8 +40,6 @@ services:
       # Boot-time toggles.
       - key: NODE_ENV
         value: production
-      - key: RUN_MIGRATIONS
-        value: "true"
 
       # Single-tenant mode for the demo. Flip to "multi" only when we add
       # per-client login and slug resolution.

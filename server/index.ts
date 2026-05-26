@@ -9,12 +9,12 @@ import { runMigrations } from "./db";
 const PORT = Number(process.env.PORT ?? 5000);
 
 async function main() {
-  // Apply pending migrations on boot when explicitly enabled. On Render this
-  // is set to "true" so a fresh deploy schemas itself; locally we keep it
-  // false to avoid surprises during development (use `npm run db:push`).
-  if (process.env.RUN_MIGRATIONS === "true") {
-    await runMigrations();
-  }
+  // Always apply pending migrations on boot. Drizzle's migrator is idempotent —
+  // it tracks applied migrations in `drizzle.__drizzle_migrations` and no-ops
+  // when everything is up to date — so running this every start is safe and
+  // removes one thing that can be misconfigured per environment. Matches
+  // clinic-ai's pattern.
+  await runMigrations();
 
   await ensureDemoClient(); // seed before accepting traffic
 
