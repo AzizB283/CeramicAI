@@ -16,15 +16,22 @@ import { z } from "zod";
 // ── ceramic_clients — multi-tenant root (spec §5.1) ─────────────────────
 export const ceramicClients = pgTable("ceramic_clients", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // URL-safe identifier for the per-client WhatsApp webhook
+  // (POST /api/whatsapp/:slug) and the embed widget's data-client attribute.
+  // Unique. The demo row's slug is "demo".
+  slug: text("slug").notNull().unique(),
   name: text("name").notNull(), // "Shree Tiles Pvt Ltd"
   mode: text("mode").notNull(), // "factory" | "exporter"
   ownerName: text("owner_name"),
   ownerWhatsapp: text("owner_whatsapp"), // owner phone for alerts
   catalogUrl: text("catalog_url"),
   exportCatalogUrl: text("export_catalog_url"),
-  waPhoneId: text("wa_phone_id"), // WhatsApp Cloud API phone ID
-  waToken: text("wa_token"), // encrypted at application layer
-  waVerifyToken: text("wa_verify_token"),
+  // WhatsApp Business Cloud API credentials (per-client; encrypted at the
+  // application layer for the secrets — token + app_secret).
+  waPhoneId: text("wa_phone_id"), // WhatsApp Cloud API phone number id
+  waToken: text("wa_token"), // permanent access token (encrypted v2:…)
+  waVerifyToken: text("wa_verify_token"), // webhook verify token (plain — public-ish)
+  waAppSecret: text("wa_app_secret"), // Meta App Secret (encrypted v2:…) — used to verify X-Hub-Signature-256
   widgetColor: text("widget_color").default("e85d04"),
   widgetName: text("widget_name"),
   widgetGreeting: text("widget_greeting"),

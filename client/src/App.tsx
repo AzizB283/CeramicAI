@@ -15,6 +15,7 @@ import AdminDashboard from "@/pages/admin/dashboard";
 import AdminLeads from "@/pages/admin/leads";
 import AdminCatalogues from "@/pages/admin/catalogues";
 import AdminChatWidget from "@/pages/admin/chat-widget";
+import AdminIntegrations from "@/pages/admin/integrations";
 import AdminSettings from "@/pages/admin/settings";
 
 function LoadingSpinner() {
@@ -74,6 +75,13 @@ function Router() {
         <ProtectedRoute>
           <AdminLayout>
             <AdminChatWidget />
+          </AdminLayout>
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/integrations">
+        <ProtectedRoute>
+          <AdminLayout>
+            <AdminIntegrations />
           </AdminLayout>
         </ProtectedRoute>
       </Route>

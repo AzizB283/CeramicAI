@@ -5,6 +5,7 @@ import { requireAuth } from "../auth";
 import { ensureDemoClient } from "../seed";
 import { runWithClient } from "../middleware/tenant";
 import { storage } from "../storage";
+import { encrypt, decrypt, isEncrypted } from "../utils/encryption";
 
 export const adminRouter = Router();
 
@@ -218,4 +219,112 @@ adminRouter.delete("/catalogues/:id", async (req, res) => {
   const clientId = await ensureDemoClient();
   await runWithClient(clientId, () => storage.deleteCatalogue(id));
   res.status(204).end();
+});
+
+// ── WhatsApp config ───────────────────────────────────────────────────
+//
+// The factory pastes their Meta WhatsApp Business credentials into the
+// Integrations page. We store the access token and app secret encrypted
+// (v2:…) and mask them on read so the UI can show "*** configured" without
+// surfacing the raw secret.
+
+interface WhatsAppConfigResponse {
+  slug: string;
+  waPhoneId: string | null;
+  waVerifyToken: string | null;
+  waTokenConfigured: boolean;
+  waAppSecretConfigured: boolean;
+  webhookUrl: string; // computed for the UI to show
+}
+
+function publicWhatsAppConfig(client: CeramicClient, originHint: string): WhatsAppConfigResponse {
+  return {
+    slug: client.slug,
+    waPhoneId: client.waPhoneId,
+    waVerifyToken: client.waVerifyToken,
+    waTokenConfigured: !!client.waToken,
+    waAppSecretConfigured: !!client.waAppSecret,
+    webhookUrl: `${originHint.replace(/\/$/, "")}/api/whatsapp/${client.slug}`,
+  };
+}
+
+// GET /api/admin/whatsapp → current config (secrets masked)
+adminRouter.get("/whatsapp", async (req, res) => {
+  const clientId = await ensureDemoClient();
+  const client = await storage.getClient(clientId);
+  if (!client) return res.status(404).json({ error: "client not found" });
+  const origin = `${req.protocol}://${req.get("host") ?? "localhost"}`;
+  res.json(publicWhatsAppConfig(client, origin));
+});
+
+// PATCH /api/admin/whatsapp → update fields. Body shape:
+//   { waPhoneId?, waVerifyToken?, waToken?, waAppSecret? }
+// Secrets (waToken, waAppSecret) get encrypted on the way in. To CLEAR a
+// secret, send the literal string "" (empty string). To leave it
+// unchanged, omit the field.
+adminRouter.patch("/whatsapp", async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+
+  const patch: Record<string, string | null> = {};
+
+  // Plain fields — public-ish, stored as-is.
+  for (const field of ["waPhoneId", "waVerifyToken"] as const) {
+    if (field in body) {
+      const v = body[field];
+      patch[field] = typeof v === "string" && v.trim() ? v.trim() : null;
+    }
+  }
+
+  // Secrets — encrypted before storage. Don't re-encrypt already-encrypted
+  // values (callers shouldn't be sending those, but be defensive).
+  for (const field of ["waToken", "waAppSecret"] as const) {
+    if (field in body) {
+      const v = body[field];
+      if (typeof v !== "string" || !v.trim()) {
+        patch[field] = null;
+      } else if (isEncrypted(v)) {
+        patch[field] = v;
+      } else {
+        patch[field] = encrypt(v.trim());
+      }
+    }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return res.status(400).json({ error: "no editable WhatsApp fields provided" });
+  }
+
+  const clientId = await ensureDemoClient();
+  const updated = await storage.updateClient(clientId, patch);
+  const origin = `${req.protocol}://${req.get("host") ?? "localhost"}`;
+  res.json(publicWhatsAppConfig(updated, origin));
+});
+
+// POST /api/admin/whatsapp/test → quick sanity check: are credentials present,
+// and can we decrypt them? Doesn't actually call Meta — that's the dashboard's
+// "Send a test message" affordance (TODO once webhooks are confirmed live).
+adminRouter.post("/whatsapp/test", async (_req, res) => {
+  const clientId = await ensureDemoClient();
+  const client = await storage.getClient(clientId);
+  if (!client) return res.status(404).json({ error: "client not found" });
+  const problems: string[] = [];
+  if (!client.waPhoneId) problems.push("Missing waPhoneId");
+  if (!client.waToken) problems.push("Missing access token");
+  if (!client.waVerifyToken) problems.push("Missing verify token");
+  if (!client.waAppSecret) problems.push("Missing app secret");
+  if (client.waToken) {
+    try {
+      decrypt(client.waToken);
+    } catch {
+      problems.push("Access token could not be decrypted (re-save it)");
+    }
+  }
+  if (client.waAppSecret) {
+    try {
+      decrypt(client.waAppSecret);
+    } catch {
+      problems.push("App secret could not be decrypted (re-save it)");
+    }
+  }
+  res.json({ ok: problems.length === 0, problems });
 });

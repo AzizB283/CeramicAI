@@ -29,6 +29,7 @@ import {
   Users,
   BookOpen,
   MessageSquare,
+  Plug,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -38,6 +39,7 @@ const menuItems = [
   { title: "Leads", url: "/admin/leads", icon: Users },
   { title: "Catalogues", url: "/admin/catalogues", icon: BookOpen },
   { title: "Chat Widget", url: "/admin/chat-widget", icon: MessageSquare },
+  { title: "Integrations", url: "/admin/integrations", icon: Plug },
   { title: "Settings", url: "/admin/settings", icon: Settings },
 ];
 

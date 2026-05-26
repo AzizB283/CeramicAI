@@ -15,6 +15,13 @@
       "when": 1779775680557,
       "tag": "0001_nosy_blizzard",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779802385026,
+      "tag": "0002_luxuriant_ben_urich",
+      "breakpoints": true
     }
   ]
 }

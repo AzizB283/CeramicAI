@@ -92,6 +92,17 @@ export const storage = {
     return row;
   },
 
+  // Look up a client by its public slug. Used by the WhatsApp webhook (no
+  // auth context — the slug IS the routing key) and the embed widget.
+  async getClientBySlug(slug: string): Promise<CeramicClient | undefined> {
+    const [row] = await db
+      .select()
+      .from(ceramicClients)
+      .where(eq(ceramicClients.slug, slug))
+      .limit(1);
+    return row;
+  },
+
   // Update a client by id (single-tenant: the demo client is the only one).
   // Scoped by id like getClient — no tenant predicate, since the caller
   // already resolves the id via ensureDemoClient/getClient.

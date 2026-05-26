@@ -4,13 +4,25 @@ import { chatRouter } from "./routes/chat";
 import { authRouter } from "./routes/auth";
 import { adminRouter } from "./routes/admin";
 import { publicRouter } from "./routes/public";
+import { whatsappRouter } from "./routes/whatsapp";
 import { setupAuth } from "./auth";
 import { allowEmbedding } from "./middleware/embed-framing";
 import { serveStatic } from "./static";
 
 export function buildApp() {
   const app = express();
-  app.use(express.json());
+
+  // Capture the raw body buffer alongside the parsed JSON. The WhatsApp
+  // webhook (POST /api/whatsapp/:slug) needs the exact bytes to verify
+  // Meta's X-Hub-Signature-256 HMAC; other routes ignore the field.
+  app.use(
+    express.json({
+      verify: (req, _res, buf) => {
+        (req as Request & { rawBody?: Buffer }).rawBody = buf;
+      },
+    }),
+  );
+
   // Session middleware must run before any router that reads req.session.
   setupAuth(app);
 
@@ -18,6 +30,11 @@ export function buildApp() {
   // CORS open: widget.js makes XHR calls to /api/public/widget-config from
   // any origin embedding the script.
   app.use("/api/public", cors({ origin: true, credentials: false }), publicRouter);
+
+  // WhatsApp webhook. Multi-tenant: /api/whatsapp/:slug. No auth — Meta's
+  // signature header on POST and the per-client verify token on GET are
+  // the trust boundary.
+  app.use("/api/whatsapp", whatsappRouter);
 
   // API
   app.use("/api/chat", chatRouter);

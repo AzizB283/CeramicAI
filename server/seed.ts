@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { storage } from "./storage";
 
 const DEMO_CLIENT_NAME = "Shree Tiles Pvt Ltd (Demo)";
+export const DEMO_CLIENT_SLUG = "demo";
 
 let cachedId: string | null = null;
 
@@ -17,9 +18,14 @@ export async function ensureDemoClient(): Promise<string> {
     .limit(1);
   if (existing) {
     cachedId = existing.id;
+    // Backfill the slug on existing demo rows from before the column existed.
+    if (!existing.slug) {
+      await storage.updateClient(cachedId, { slug: DEMO_CLIENT_SLUG });
+    }
     return cachedId;
   }
   const created = await storage.createClient({
+    slug: DEMO_CLIENT_SLUG,
     name: DEMO_CLIENT_NAME,
     mode: "factory",
     ownerName: "Demo Owner",

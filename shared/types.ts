@@ -84,6 +84,8 @@ export interface LeadDraft {
   buyerName?: string;
   buyerCity?: string;
   buyerCompany?: string;
+  /** Captured automatically on WhatsApp from the sender's number. */
+  buyerPhone?: string;
   priority?: "normal" | "high" | "priority";
 }
 

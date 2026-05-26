@@ -9,6 +9,7 @@ let client: CeramicClient;
 beforeAll(async () => {
   // Create a tenant to scope the rest of the tests under.
   client = await storage.createClient({
+    slug: `test-${Date.now()}`,
     name: "Test Tiles Pvt Ltd",
     mode: "factory",
     ownerName: "Owner",
@@ -141,12 +142,14 @@ describe("cross-tenant isolation (multi mode)", () => {
     // createClient runs outside any tenant context and does not use
     // withClientId, so creating both tenants directly works in multi mode.
     clientA = await storage.createClient({
+      slug: `tenant-a-${Date.now()}`,
       name: "Tenant A",
       mode: "factory",
       ownerName: "Owner A",
       ownerWhatsapp: "+911111111111",
     });
     clientB = await storage.createClient({
+      slug: `tenant-b-${Date.now()}`,
       name: "Tenant B",
       mode: "factory",
       ownerName: "Owner B",
