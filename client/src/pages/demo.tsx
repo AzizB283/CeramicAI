@@ -101,10 +101,12 @@ export default function DemoChat() {
           ))}
           {chat.typing && <TypingDots />}
 
-          {/* Catalog link button, shown on catalog steps once bot finished. */}
+          {/* Catalog link button — prefer the URL the server picked from the
+              admin's catalogues table; fall back to the hardcoded placeholder
+              when no catalogue matches and the client has no default set. */}
           {step.catalog && !chat.typing && (
             <a
-              href={CATALOG_URL[step.catalog]}
+              href={step.catalogUrl ?? CATALOG_URL[step.catalog]}
               target="_blank"
               rel="noreferrer"
               className="flex w-fit items-center gap-2 rounded-xl border border-coral bg-white px-4 py-2.5 text-sm font-medium text-coral-dark shadow-sm transition hover:bg-coral/10"

@@ -1,12 +1,13 @@
 import { Router } from "express";
 import type { Mode, LeadDraft } from "@shared/types";
 import type { InsertCeramicLead } from "@shared/schema";
-import { startFlow, advanceFlow } from "@shared/flowEngine";
+import { startFlow, advanceFlow, type FlowSnapshot } from "@shared/flowEngine";
 import { createSession, getSession, setSession, deleteSession } from "../services/chatSessions";
 import { ensureDemoClient } from "../seed";
 import { runWithClient } from "../middleware/tenant";
 import { storage } from "../storage";
 import { answerSideQuestion } from "../services/openaiAsk";
+import { pickCatalogue } from "../services/catalogueMatcher";
 
 function buildLeadInsert(sessionId: string, l: LeadDraft): InsertCeramicLead {
   return {
@@ -31,12 +32,31 @@ function buildLeadInsert(sessionId: string, l: LeadDraft): InsertCeramicLead {
   };
 }
 
+/**
+ * If the snapshot is on a catalog step, attach the best-matching catalogue
+ * URL the admin uploaded. Falls back to the client's default factory/export
+ * catalog URL when no good match exists. Returns the snapshot unchanged
+ * when not on a catalog step.
+ */
+async function attachCatalogueUrl(snap: FlowSnapshot, mode: Mode): Promise<FlowSnapshot> {
+  if (!snap.catalog) return snap;
+  const clientId = await ensureDemoClient();
+  const [client, catalogues] = await Promise.all([
+    storage.getClient(clientId),
+    runWithClient(clientId, () => storage.getCatalogues()),
+  ]);
+  const match = pickCatalogue(snap.lead, mode, catalogues);
+  const fallback = snap.catalog === "export" ? client?.exportCatalogUrl : client?.catalogUrl;
+  const catalogUrl = match?.url ?? fallback ?? undefined;
+  return catalogUrl ? { ...snap, catalogUrl } : snap;
+}
+
 export const chatRouter = Router();
 
 // POST /api/chat/session  { mode } → { sessionId, ...snapshot }
-chatRouter.post("/session", (req, res) => {
+chatRouter.post("/session", async (req, res) => {
   const mode: Mode = req.body?.mode === "exporter" ? "exporter" : "factory";
-  const snap = startFlow(mode);
+  const snap = await attachCatalogueUrl(startFlow(mode), mode);
   const session = createSession({ mode, stepId: snap.stepId, lead: snap.lead });
   res.json({ sessionId: session.id, ...snap });
 });
@@ -50,13 +70,16 @@ chatRouter.post("/message", async (req, res) => {
   if (text !== undefined && typeof text !== "string")
     return res.status(400).json({ error: "text must be a string" });
 
-  const snap = advanceFlow({
-    mode: session.mode,
-    stepId: session.stepId,
-    lead: session.lead,
-    choiceLabel,
-    text,
-  });
+  const snap = await attachCatalogueUrl(
+    advanceFlow({
+      mode: session.mode,
+      stepId: session.stepId,
+      lead: session.lead,
+      choiceLabel,
+      text,
+    }),
+    session.mode,
+  );
 
   setSession(sessionId, { mode: session.mode, stepId: snap.stepId, lead: snap.lead });
 

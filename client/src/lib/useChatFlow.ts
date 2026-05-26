@@ -21,6 +21,10 @@ interface Step {
   options: QuickReply[];
   placeholder?: string;
   catalog?: "factory" | "export";
+  /** Catalogue URL the server picked from the admin's `ceramic_catalogues`
+   *  table (or the client's default catalogUrl); falls back to the hardcoded
+   *  placeholder when undefined. */
+  catalogUrl?: string;
 }
 
 const EMPTY_STEP: Step = { input: "choice", options: [] };
@@ -30,6 +34,7 @@ const stepFromSnapshot = (snap: FlowSnapshot): Step => ({
   options: snap.quickReplies,
   placeholder: snap.placeholder,
   catalog: snap.catalog,
+  catalogUrl: snap.catalogUrl,
 });
 
 /**

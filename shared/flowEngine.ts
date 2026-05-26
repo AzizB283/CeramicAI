@@ -26,6 +26,13 @@ export interface FlowSnapshot {
   inputKind: "choice" | "text";
   placeholder?: string;
   catalog?: "factory" | "export";
+  /**
+   * The actual catalogue link to share with the buyer when `catalog` is set.
+   * The server picks this from `ceramic_catalogues` based on the lead's
+   * mode/category/size/finish, falling back to the client's default catalog
+   * URL. If absent, the client should fall back to a hardcoded placeholder.
+   */
+  catalogUrl?: string;
   terminal: boolean;
   ownerAlert: OwnerAlert | null;
   /** Set when advanceFlow took the "Start over" path; tells the caller to reset. */
