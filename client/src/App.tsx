@@ -13,6 +13,7 @@ import LoginPage from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminLeads from "@/pages/admin/leads";
+import AdminCatalogues from "@/pages/admin/catalogues";
 import AdminChatWidget from "@/pages/admin/chat-widget";
 import AdminSettings from "@/pages/admin/settings";
 
@@ -59,6 +60,13 @@ function Router() {
         <ProtectedRoute>
           <AdminLayout>
             <AdminLeads />
+          </AdminLayout>
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/catalogues">
+        <ProtectedRoute>
+          <AdminLayout>
+            <AdminCatalogues />
           </AdminLayout>
         </ProtectedRoute>
       </Route>

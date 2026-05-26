@@ -15,7 +15,9 @@ import {
   CheckCircle2,
   Globe2,
   CalendarClock,
+  AlertTriangle,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   ResponsiveContainer,
   BarChart,
@@ -31,6 +33,7 @@ interface AdminStats {
   byStatus: { new: number; contacted: number; converted: number; lost: number };
   byPriority: { normal: number; high: number; priority: number };
   distributorInquiries: number;
+  priorityWaiting: number;
   recent: number;
 }
 
@@ -89,7 +92,7 @@ export default function AdminDashboard() {
               Once buyers start chatting with CeramicBot, captured inquiries will
               show up here. Try the chat to generate a demo lead.
             </p>
-            <Link href="/admin/chat-preview">
+            <Link href="/admin/chat-widget">
               <Button>Open chat preview</Button>
             </Link>
           </CardContent>
@@ -144,12 +147,40 @@ export default function AdminDashboard() {
     { name: "Lost", value: stats?.byStatus.lost ?? 0, key: "lost" },
   ];
 
+  const priorityWaiting = stats?.priorityWaiting ?? 0;
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <p className="text-muted-foreground">Overview of your ceramic leads</p>
       </div>
+
+      {priorityWaiting > 0 && (
+        <Link href="/admin/leads">
+          <Card
+            className={cn(
+              "cursor-pointer border-red-300 bg-red-50 transition hover:border-red-400 hover:bg-red-100",
+              "dark:border-red-900 dark:bg-red-950/40 dark:hover:bg-red-950/60",
+            )}
+          >
+            <CardContent className="flex items-center gap-4 py-5">
+              <div className="grid h-12 w-12 place-items-center rounded-full bg-red-500/15 text-red-600">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <div className="flex-1">
+                <div className="text-2xl font-bold text-red-700 dark:text-red-300">
+                  {priorityWaiting} priority lead{priorityWaiting === 1 ? "" : "s"} waiting
+                </div>
+                <p className="text-sm text-red-700/80 dark:text-red-300/80">
+                  Distributor / exclusive-rights inquiries that haven't been converted or lost yet.
+                  Click to view.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {cards.map((c) => (

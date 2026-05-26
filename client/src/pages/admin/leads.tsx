@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +12,8 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -19,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Globe2 } from "lucide-react";
+import { Users, Globe2, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type LeadStatus = "new" | "contacted" | "converted" | "lost";
@@ -92,6 +95,15 @@ export default function AdminLeads() {
     queryKey: ["/api/admin/leads"],
   });
 
+  const [priorityOnly, setPriorityOnly] = useState(false);
+
+  const visibleLeads = useMemo(() => {
+    if (!leads) return [];
+    return priorityOnly ? leads.filter((l) => l.priority === "priority") : leads;
+  }, [leads, priorityOnly]);
+
+  const priorityCount = leads?.filter((l) => l.priority === "priority").length ?? 0;
+
   const updateStatus = useMutation({
     mutationFn: ({ id, status }: { id: number; status: LeadStatus }) =>
       apiRequest("PATCH", `/api/admin/leads/${id}`, { status }),
@@ -138,12 +150,28 @@ export default function AdminLeads() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Leads</h1>
-        <p className="text-muted-foreground">Buyer inquiries captured by the bot</p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold">Leads</h1>
+          <p className="text-muted-foreground">Buyer inquiries captured by the bot</p>
+        </div>
+        {priorityCount > 0 && (
+          <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm dark:border-red-900 dark:bg-red-950/40">
+            <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
+            <Label htmlFor="priority-only" className="cursor-pointer">
+              Priority only{" "}
+              <span className="text-muted-foreground">({priorityCount})</span>
+            </Label>
+            <Switch
+              id="priority-only"
+              checked={priorityOnly}
+              onCheckedChange={setPriorityOnly}
+            />
+          </div>
+        )}
       </div>
 
-      {leads && leads.length > 0 ? (
+      {visibleLeads.length > 0 ? (
         <Card>
           <CardContent className="pt-6">
             <div className="overflow-x-auto">
@@ -161,15 +189,20 @@ export default function AdminLeads() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {leads.map((lead) => {
+                  {visibleLeads.map((lead) => {
                     const priority = (lead.priority ?? "normal") as LeadPriority;
                     const status = (lead.status ?? "new") as LeadStatus;
+                    const isPriority = priority === "priority";
                     return (
                       <TableRow
                         key={lead.id}
                         data-testid={`row-lead-${lead.id}`}
                         className={cn(
-                          lead.isDistributorInquiry && "bg-coral/5",
+                          // Red left-edge ribbon for priority rows; subtle coral
+                          // tint for distributor inquiries (often the same row,
+                          // priority wins visually).
+                          isPriority && "border-l-4 border-l-red-500 bg-red-50/40 dark:bg-red-950/20",
+                          !isPriority && lead.isDistributorInquiry && "bg-coral/5",
                         )}
                       >
                         <TableCell className="font-medium">
@@ -238,10 +271,22 @@ export default function AdminLeads() {
         <Card>
           <CardContent className="py-12 text-center">
             <Users className="mx-auto mb-4 h-12 w-12 text-muted-foreground opacity-50" />
-            <h3 className="mb-2 font-semibold">No leads yet</h3>
-            <p className="text-muted-foreground">
-              Buyer inquiries will appear here once people chat with CeramicBot.
-            </p>
+            {priorityOnly && (leads?.length ?? 0) > 0 ? (
+              <>
+                <h3 className="mb-2 font-semibold">No priority leads</h3>
+                <p className="text-muted-foreground">
+                  No distributor or exclusive-rights inquiries yet. Turn off the filter to see all
+                  leads.
+                </p>
+              </>
+            ) : (
+              <>
+                <h3 className="mb-2 font-semibold">No leads yet</h3>
+                <p className="text-muted-foreground">
+                  Buyer inquiries will appear here once people chat with CeramicBot.
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
       )}

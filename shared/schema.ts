@@ -8,6 +8,7 @@ import {
   serial,
   uuid,
   index,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -112,3 +113,41 @@ export const insertCeramicFollowupSchema = createInsertSchema(ceramicFollowups).
 });
 export type CeramicFollowup = typeof ceramicFollowups.$inferSelect;
 export type InsertCeramicFollowup = z.infer<typeof insertCeramicFollowupSchema>;
+
+// ── ceramic_catalogues — per-factory PDF / Google Drive catalogues ──────
+// Matches the real-world pattern observed on Simpolo / Kajaria / Varmora:
+// factories don't list individual products, they publish category-tagged
+// catalogue PDFs and refresh them as designs change. The bot picks the
+// best-matching catalogue when a buyer specifies category + size + finish.
+export const ceramicCatalogues = pgTable(
+  "ceramic_catalogues",
+  {
+    id: serial("id").primaryKey(),
+    clientId: uuid("client_id").notNull().references(() => ceramicClients.id),
+    title: text("title").notNull(), // "GVT Catalogue 2026", "Marmorica Collection"
+    category: text("category").notNull(), // ceramic_wall | gvt | pgvt | double_charge | slab | sanitaryware | mixed
+    audience: text("audience").notNull().default("both"), // domestic | export | both
+    url: text("url").notNull(), // Google Drive / Dropbox / hosted PDF link
+    description: text("description"), // optional one-liner the bot can mention
+    sizes: jsonb("sizes").$type<string[]>().default([]).notNull(), // e.g. ["600x600", "800x800"]
+    finishes: jsonb("finishes").$type<string[]>().default([]).notNull(), // e.g. ["matte", "glossy"]
+    isActive: boolean("is_active").default(true).notNull(),
+    displayOrder: integer("display_order").default(0).notNull(),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [
+    index("idx_ceramic_catalogues_client_id").on(t.clientId),
+    index("idx_ceramic_catalogues_client_active").on(t.clientId, t.isActive),
+    index("idx_ceramic_catalogues_match").on(t.clientId, t.category, t.audience),
+  ],
+);
+
+export const insertCeramicCatalogueSchema = createInsertSchema(ceramicCatalogues).omit({
+  id: true,
+  clientId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type CeramicCatalogue = typeof ceramicCatalogues.$inferSelect;
+export type InsertCeramicCatalogue = z.infer<typeof insertCeramicCatalogueSchema>;

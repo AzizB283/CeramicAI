@@ -27,6 +27,7 @@ import {
 import {
   LayoutDashboard,
   Users,
+  BookOpen,
   MessageSquare,
   Settings,
   LogOut,
@@ -35,6 +36,7 @@ import {
 const menuItems = [
   { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
   { title: "Leads", url: "/admin/leads", icon: Users },
+  { title: "Catalogues", url: "/admin/catalogues", icon: BookOpen },
   { title: "Chat Widget", url: "/admin/chat-widget", icon: MessageSquare },
   { title: "Settings", url: "/admin/settings", icon: Settings },
 ];

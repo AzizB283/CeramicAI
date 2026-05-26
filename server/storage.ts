@@ -1,16 +1,19 @@
-import { eq, and, lte, desc, type SQL } from "drizzle-orm";
+import { eq, and, lte, desc, asc, type SQL } from "drizzle-orm";
 import { db } from "./db";
 import { currentClientId, getTenantMode } from "./middleware/tenant";
 import {
   ceramicClients,
   ceramicLeads,
   ceramicFollowups,
+  ceramicCatalogues,
   type CeramicClient,
   type InsertCeramicClient,
   type CeramicLead,
   type InsertCeramicLead,
   type CeramicFollowup,
   type InsertCeramicFollowup,
+  type CeramicCatalogue,
+  type InsertCeramicCatalogue,
 } from "@shared/schema";
 import { encrypt, decrypt, isEncrypted, hashPhone } from "./utils/encryption";
 
@@ -174,6 +177,48 @@ export const storage = {
       .select()
       .from(ceramicFollowups)
       .where(and(eq(ceramicFollowups.sent, false), lte(ceramicFollowups.sendAt, now)));
+  },
+
+  // catalogues — per-factory PDF / Drive URLs the bot serves to buyers
+  async createCatalogue(input: InsertCeramicCatalogue): Promise<CeramicCatalogue> {
+    const [row] = await db
+      .insert(ceramicCatalogues)
+      .values(withClientId(input) as typeof ceramicCatalogues.$inferInsert)
+      .returning();
+    return row;
+  },
+
+  async getCatalogues(): Promise<CeramicCatalogue[]> {
+    return db
+      .select()
+      .from(ceramicCatalogues)
+      .where(scope(ceramicCatalogues.clientId))
+      .orderBy(asc(ceramicCatalogues.displayOrder), desc(ceramicCatalogues.createdAt));
+  },
+
+  async getCatalogue(id: number): Promise<CeramicCatalogue | undefined> {
+    const [row] = await db
+      .select()
+      .from(ceramicCatalogues)
+      .where(and(eq(ceramicCatalogues.id, id), scope(ceramicCatalogues.clientId)))
+      .limit(1);
+    return row;
+  },
+
+  async updateCatalogue(id: number, patch: Partial<InsertCeramicCatalogue>): Promise<CeramicCatalogue> {
+    const [row] = await db
+      .update(ceramicCatalogues)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(and(eq(ceramicCatalogues.id, id), scope(ceramicCatalogues.clientId)))
+      .returning();
+    if (!row) throw new Error(`Catalogue ${id} not found in current tenant`);
+    return row;
+  },
+
+  async deleteCatalogue(id: number): Promise<void> {
+    await db
+      .delete(ceramicCatalogues)
+      .where(and(eq(ceramicCatalogues.id, id), scope(ceramicCatalogues.clientId)));
   },
 };
 

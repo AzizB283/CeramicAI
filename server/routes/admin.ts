@@ -1,5 +1,6 @@
 import { Router } from "express";
-import type { CeramicClient, CeramicLead } from "@shared/schema";
+import type { CeramicClient, CeramicLead, InsertCeramicCatalogue } from "@shared/schema";
+import { insertCeramicCatalogueSchema } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { ensureDemoClient } from "../seed";
 import { runWithClient } from "../middleware/tenant";
@@ -82,6 +83,9 @@ adminRouter.get("/stats", async (_req, res) => {
   const byPriority = { normal: 0, high: 0, priority: 0 };
   let distributorInquiries = 0;
   let recent = 0;
+  // Priority leads still awaiting action — status new or contacted (i.e. not
+  // converted/lost). This is the count the owner needs to see on the dashboard.
+  let priorityWaiting = 0;
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
   for (const lead of leads as CeramicLead[]) {
@@ -93,6 +97,12 @@ adminRouter.get("/stats", async (_req, res) => {
     }
     if (lead.isDistributorInquiry) distributorInquiries++;
     if (lead.createdAt && new Date(lead.createdAt).getTime() >= sevenDaysAgo) recent++;
+    if (
+      lead.priority === "priority" &&
+      (lead.status === "new" || lead.status === "contacted")
+    ) {
+      priorityWaiting++;
+    }
   }
 
   res.json({
@@ -100,6 +110,7 @@ adminRouter.get("/stats", async (_req, res) => {
     byStatus,
     byPriority,
     distributorInquiries,
+    priorityWaiting,
     recent,
   });
 });
@@ -125,4 +136,86 @@ adminRouter.patch("/settings", async (req, res) => {
   const clientId = await ensureDemoClient();
   const updated = await storage.updateClient(clientId, patch);
   res.json(publicClient(updated));
+});
+
+// ── Catalogues ────────────────────────────────────────────────────────
+//
+// Per-factory PDF / Google Drive catalogues. Tenant-scoped via runWithClient.
+// All mutations go through Zod validation (insertCeramicCatalogueSchema +
+// .partial() for PATCH) so the client can't sneak unknown fields through.
+
+const CATALOGUE_CATEGORIES = [
+  "ceramic_wall",
+  "gvt",
+  "pgvt",
+  "double_charge",
+  "slab",
+  "sanitaryware",
+  "mixed",
+] as const;
+const CATALOGUE_AUDIENCES = ["domestic", "export", "both"] as const;
+
+const catalogueInputSchema = insertCeramicCatalogueSchema.extend({
+  category: insertCeramicCatalogueSchema.shape.category.refine(
+    (v): v is (typeof CATALOGUE_CATEGORIES)[number] =>
+      (CATALOGUE_CATEGORIES as readonly string[]).includes(v),
+    { message: `category must be one of ${CATALOGUE_CATEGORIES.join(", ")}` },
+  ),
+  audience: insertCeramicCatalogueSchema.shape.audience.refine(
+    (v): v is (typeof CATALOGUE_AUDIENCES)[number] =>
+      v == null || (CATALOGUE_AUDIENCES as readonly string[]).includes(v),
+    { message: `audience must be one of ${CATALOGUE_AUDIENCES.join(", ")}` },
+  ),
+  url: insertCeramicCatalogueSchema.shape.url.refine(
+    (v) => /^https?:\/\//i.test(v),
+    { message: "url must start with http:// or https://" },
+  ),
+});
+
+// GET /api/admin/catalogues → list (newest active first, then by display order)
+adminRouter.get("/catalogues", async (_req, res) => {
+  const clientId = await ensureDemoClient();
+  const list = await runWithClient(clientId, () => storage.getCatalogues());
+  res.json(list);
+});
+
+// POST /api/admin/catalogues → create
+adminRouter.post("/catalogues", async (req, res) => {
+  const parsed = catalogueInputSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid catalogue", issues: parsed.error.flatten() });
+  }
+  const clientId = await ensureDemoClient();
+  const created = await runWithClient(clientId, () =>
+    storage.createCatalogue(parsed.data as InsertCeramicCatalogue),
+  );
+  res.status(201).json(created);
+});
+
+// PATCH /api/admin/catalogues/:id → update fields
+adminRouter.patch("/catalogues/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "invalid catalogue id" });
+  const parsed = catalogueInputSchema.partial().safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid patch", issues: parsed.error.flatten() });
+  }
+  const clientId = await ensureDemoClient();
+  try {
+    const updated = await runWithClient(clientId, () =>
+      storage.updateCatalogue(id, parsed.data as Partial<InsertCeramicCatalogue>),
+    );
+    res.json(updated);
+  } catch {
+    res.status(404).json({ error: "catalogue not found" });
+  }
+});
+
+// DELETE /api/admin/catalogues/:id
+adminRouter.delete("/catalogues/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "invalid catalogue id" });
+  const clientId = await ensureDemoClient();
+  await runWithClient(clientId, () => storage.deleteCatalogue(id));
+  res.status(204).end();
 });
