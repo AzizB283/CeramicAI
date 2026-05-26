@@ -59,10 +59,18 @@ export function useChatFlow(initialMode: Mode) {
     timers.current = [];
   };
 
-  const pushBot = (text: string) =>
-    setMessages((m) => [...m, { id: nextId(), role: "bot", text }]);
+  const pushBot = (text: string, quickReplies?: QuickReply[]) =>
+    setMessages((m) => [
+      // Clear chips on any previous messages so only the latest set is live.
+      ...m.map((msg) => (msg.quickReplies ? { ...msg, quickReplies: undefined } : msg)),
+      { id: nextId(), role: "bot", text, quickReplies },
+    ]);
   const pushUser = (text: string) =>
-    setMessages((m) => [...m, { id: nextId(), role: "user", text }]);
+    setMessages((m) => [
+      // Tapping/typing dismisses any pending chips immediately.
+      ...m.map((msg) => (msg.quickReplies ? { ...msg, quickReplies: undefined } : msg)),
+      { id: nextId(), role: "user", text },
+    ]);
 
   /**
    * Apply a server snapshot to the UI: emit its (already-rendered) bot bubbles
@@ -89,7 +97,14 @@ export function useChatFlow(initialMode: Mode) {
     const last = snap.botMessages.length - 1;
     snap.botMessages.forEach((line, i) => {
       const t1 = setTimeout(() => {
-        pushBot(line);
+        // Attach the snapshot's quick replies to ONLY the final bubble of the
+        // turn — they belong to "what the bot just asked". Earlier bubbles in
+        // the same snapshot are plain narration.
+        const chips =
+          i === last && snap.inputKind === "choice" && snap.quickReplies.length > 0
+            ? snap.quickReplies
+            : undefined;
+        pushBot(line, chips);
         if (i === last) setTyping(false);
       }, delay + 650);
       timers.current.push(t1);
@@ -169,25 +184,52 @@ export function useChatFlow(initialMode: Mode) {
     [mode, playSnapshot, postMessage, start],
   );
 
-  /** User submitted free text. */
+  /**
+   * User submitted free text. Behaviour depends on the current step:
+   *
+   * - text step (the bot is asking for typed input like a name or city) →
+   *   normal flow advance via /api/chat/message.
+   *
+   * - choice step (chips are showing) → treat as a side-question off the flow:
+   *   call /api/chat/ask, render the AI's answer as a bot bubble, and
+   *   re-attach the SAME chips so the user can still answer the flow.
+   */
   const submitText = useCallback(
     async (value: string) => {
       const trimmed = value.trim();
       const sid = sessionId.current;
       if (!trimmed || !sid) return;
-      // Fix 1: set typing=true synchronously before the async fetch so the input
-      // area is replaced with the typing banner, preventing a racing second submit.
       setTyping(true);
       pushUser(trimmed);
+
+      // Capture the current chips before pushUser clears them — we'll re-attach
+      // them to the AI's answer so the user can still pick a chip after.
+      const currentChips = step.input === "choice" ? step.options : undefined;
+
       try {
-        const snap = await postMessage({ sessionId: sid, text: trimmed });
-        playSnapshot(snap);
+        if (step.input === "text") {
+          // On a text step, the typed value IS the answer; advance the flow.
+          const snap = await postMessage({ sessionId: sid, text: trimmed });
+          playSnapshot(snap);
+          return;
+        }
+
+        // On a choice step, route off-flow via /ask. The flow stays parked.
+        const res = await fetch("/api/chat/ask", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId: sid, question: trimmed }),
+        });
+        if (!res.ok) throw new Error(`ask failed: ${res.status}`);
+        const { answer } = (await res.json()) as { answer: string };
+        setTyping(false);
+        pushBot(answer, currentChips);
       } catch {
         setTyping(false);
-        pushBot("Sorry, something went wrong.");
+        pushBot("Sorry, something went wrong.", currentChips);
       }
     },
-    [playSnapshot, postMessage],
+    [playSnapshot, postMessage, step.input, step.options],
   );
 
   return {

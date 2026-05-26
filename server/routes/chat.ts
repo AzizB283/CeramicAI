@@ -6,6 +6,7 @@ import { createSession, getSession, setSession, deleteSession } from "../service
 import { ensureDemoClient } from "../seed";
 import { runWithClient } from "../middleware/tenant";
 import { storage } from "../storage";
+import { answerSideQuestion } from "../services/openaiAsk";
 
 function buildLeadInsert(sessionId: string, l: LeadDraft): InsertCeramicLead {
   return {
@@ -69,4 +70,23 @@ chatRouter.post("/message", async (req, res) => {
   }
 
   return res.json(snap);
+});
+
+// POST /api/chat/ask  { sessionId, question } → { answer }
+//
+// Off-flow side-question handler. The user typed something while a choice
+// step (chips) was active — answer via OpenAI without advancing the flow.
+chatRouter.post("/ask", async (req, res) => {
+  const { sessionId, question } = req.body ?? {};
+  if (typeof question !== "string" || !question.trim())
+    return res.status(400).json({ error: "question must be a non-empty string" });
+  const session = sessionId ? getSession(sessionId) : undefined;
+  if (!session) return res.status(404).json({ error: "session not found or expired" });
+
+  const clientId = await ensureDemoClient();
+  const client = await storage.getClient(clientId);
+  const factoryName = client?.name ?? "Shree Tiles Pvt Ltd";
+
+  const answer = await answerSideQuestion(question.trim(), session.mode, factoryName);
+  return res.json({ answer });
 });

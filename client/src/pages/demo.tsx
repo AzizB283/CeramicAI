@@ -88,7 +88,16 @@ export default function DemoChat() {
           className="scrollbar-thin flex h-[clamp(340px,55vh,500px)] flex-col gap-3 overflow-y-auto px-4 py-4"
         >
           {chat.messages.map((m) => (
-            <MessageBubble key={m.id} message={m} />
+            <div key={m.id} className="flex flex-col gap-2">
+              <MessageBubble message={m} />
+              {/* Chips rendered inline under the bot bubble that asked for them
+                  (clinic-ai pattern). They auto-disappear on the next turn. */}
+              {m.quickReplies && m.quickReplies.length > 0 && !chat.typing && (
+                <div className="pl-1">
+                  <QuickReplies options={m.quickReplies} onPick={chat.chooseOption} />
+                </div>
+              )}
+            </div>
           ))}
           {chat.typing && <TypingDots />}
 
@@ -108,18 +117,20 @@ export default function DemoChat() {
           {chat.ownerAlert && <OwnerAlertPanel alert={chat.ownerAlert} />}
         </div>
 
-        {/* Input area */}
+        {/* Input area — always available. On choice steps, free text routes to
+            the AI side-question handler; on text steps it answers the flow. */}
         <div className="border-t border-ink/10 bg-cream-deep/40 px-4 py-3">
-          {chat.typing ? (
-            <p className="py-2 text-center text-xs text-ink/40">CeramicBot is typing…</p>
-          ) : step.input === "text" ? (
-            <Composer
-              placeholder={step.placeholder ?? "Type a message…"}
-              onSend={chat.submitText}
-            />
-          ) : (
-            <QuickReplies options={step.options ?? []} onPick={chat.chooseOption} />
-          )}
+          <Composer
+            placeholder={
+              chat.typing
+                ? "CeramicBot is typing…"
+                : step.input === "text"
+                  ? (step.placeholder ?? "Type your answer…")
+                  : "Tap a chip above or ask a question…"
+            }
+            onSend={chat.submitText}
+            disabled={chat.typing}
+          />
         </div>
       </div>
 
