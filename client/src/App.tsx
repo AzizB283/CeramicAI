@@ -8,11 +8,12 @@ import { useAuth } from "@/hooks/use-auth";
 
 import { AdminLayout } from "@/components/admin-layout";
 import DemoChat from "@/pages/demo";
+import EmbedChat from "@/pages/embed-chat";
 import LoginPage from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminLeads from "@/pages/admin/leads";
-import AdminChatPreview from "@/pages/admin/chat-preview";
+import AdminChatWidget from "@/pages/admin/chat-widget";
 import AdminSettings from "@/pages/admin/settings";
 
 function LoadingSpinner() {
@@ -42,6 +43,8 @@ function Router() {
     <Switch>
       {/* Public demo */}
       <Route path="/" component={DemoChat} />
+      {/* Embeddable / standalone chat page (no chrome, iframe-friendly) */}
+      <Route path="/chat" component={EmbedChat} />
       <Route path="/login" component={LoginPage} />
 
       {/* Admin (auth-gated) */}
@@ -59,10 +62,10 @@ function Router() {
           </AdminLayout>
         </ProtectedRoute>
       </Route>
-      <Route path="/admin/chat-preview">
+      <Route path="/admin/chat-widget">
         <ProtectedRoute>
           <AdminLayout>
-            <AdminChatPreview />
+            <AdminChatWidget />
           </AdminLayout>
         </ProtectedRoute>
       </Route>

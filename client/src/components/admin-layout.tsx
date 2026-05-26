@@ -35,7 +35,7 @@ import {
 const menuItems = [
   { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
   { title: "Leads", url: "/admin/leads", icon: Users },
-  { title: "Chat Preview", url: "/admin/chat-preview", icon: MessageSquare },
+  { title: "Chat Widget", url: "/admin/chat-widget", icon: MessageSquare },
   { title: "Settings", url: "/admin/settings", icon: Settings },
 ];
 

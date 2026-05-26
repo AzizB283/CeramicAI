@@ -19,6 +19,12 @@ export interface ChatMessage {
   id: string;
   role: ChatRole;
   text: string;
+  /**
+   * Quick-reply chips attached to this bot message. Rendered as buttons
+   * directly beneath the bubble (clinic-ai pattern). Only set on the
+   * latest bot message of a snapshot; cleared on the next turn.
+   */
+  quickReplies?: QuickReply[];
 }
 
 /** How the user answers the current step. */

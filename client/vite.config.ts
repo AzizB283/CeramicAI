@@ -18,5 +18,8 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:5000",
     },
+    // Poll instead of OS inotify watchers — avoids ENOSPC "file watchers
+    // limit reached" on systems with a low fs.inotify.max_user_watches.
+    watch: { usePolling: true, interval: 300 },
   },
 });
