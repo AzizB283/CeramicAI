@@ -1,0 +1,70 @@
+# Render Blueprint for CeramicBot.
+#
+# Connect this repo to Render, then "New > Blueprint" and pick this file.
+# Render will provision:
+#   - one Postgres database (ceramicbot-db)
+#   - one web service (ceramicbot) running `npm start` after `npm install &&
+#     npm run build`
+#
+# After the first deploy, set the secrets marked `sync: false` in the
+# Render dashboard (Environment → add value) — they aren't tracked here:
+#   ENCRYPTION_KEY    →  64 hex chars (openssl rand -hex 32)
+#   SESSION_SECRET    →  long random string (openssl rand -base64 64)
+#   ADMIN_PASSWORD    →  whatever you want admin to log in with
+#   OPENAI_API_KEY    →  optional; off-flow side-questions degrade if unset
+
+databases:
+  - name: ceramicbot-db
+    # Free tier is fine for the demo; expires after 30 days, upgrade when
+    # the first paying client lands.
+    plan: free
+    postgresMajorVersion: 16
+
+services:
+  - type: web
+    name: ceramicbot
+    runtime: node
+    plan: free  # sleeps after 15 min idle; upgrade ($7/mo) for always-on
+    region: singapore  # closest Render region to Morbi / Gujarat buyers
+    branch: main  # change if you deploy from a feature branch
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      # Wire the Postgres connection string from the DB resource above.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ceramicbot-db
+          property: connectionString
+
+      # Boot-time toggles.
+      - key: NODE_ENV
+        value: production
+      - key: RUN_MIGRATIONS
+        value: "true"
+
+      # Single-tenant mode for the demo. Flip to "multi" only when we add
+      # per-client login and slug resolution.
+      - key: TENANT_MODE
+        value: single
+
+      # Admin login. Username defaults to "admin" if you don't set it.
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false  # set in the Render dashboard
+
+      # Secrets — set these in the dashboard once.
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+
+      # Optional. Without it, /api/chat/ask returns a polite fallback rather
+      # than calling OpenAI. The bot's deterministic flow still works.
+      - key: OPENAI_API_KEY
+        sync: false
+
+      # Model override (defaults to gpt-4o-mini in code).
+      - key: CHAT_AI_MODEL
+        value: gpt-4o-mini
