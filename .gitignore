@@ -7,3 +7,4 @@ client/dist
 .env.*
 !.env.example
 .superpowers/
+Clinic-ai/
