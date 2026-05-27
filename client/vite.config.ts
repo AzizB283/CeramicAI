@@ -15,6 +15,10 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    // Accept any Host header. Needed when fronting the dev server with a
+    // tunnel (ngrok / Cloudflare Tunnel / Render preview) so requests with
+    // arbitrary hostnames aren't rejected by Vite's host check.
+    allowedHosts: true,
     proxy: {
       "/api": "http://localhost:5000",
     },
