@@ -103,22 +103,39 @@ async function resolveFactoryName(): Promise<string> {
  * Build the ProductConfig the engine consumes from the rows the admin
  * configured. Returns undefined when the factory has zero rows — the engine
  * then falls back to the hardcoded defaults in flows.ts.
+ *
+ * Standard categories use their slug as the key. Custom categories
+ * (category="other") get a synthetic per-row key ("custom:<id>") so the
+ * factory can configure multiple distinct custom categories without them
+ * collapsing into one.
  */
+const STANDARD_CATEGORY_LABELS: Record<string, string> = {
+  ceramic_wall: "Ceramic Wall Tiles",
+  gvt: "GVT / Vitrified Floor",
+  pgvt: "PGVT",
+  double_charge: "Double Charge",
+  slab: "Slab (Large Format)",
+  sanitaryware: "Sanitaryware",
+};
+
 function buildProductConfig(rows: CeramicProduct[]): ProductConfig | undefined {
   const active = rows.filter((r) => r.isActive);
   if (active.length === 0) return undefined;
   const config: ProductConfig = {
     categories: [],
-    customCategoryLabels: {},
     sizesByCategory: {},
     finishesByCategory: {},
     sanitaryItems: [],
   };
   for (const row of active) {
-    config.categories.push(row.category);
-    if (row.customLabel) config.customCategoryLabels![row.category] = row.customLabel;
-    config.sizesByCategory[row.category] = row.sizes ?? [];
-    config.finishesByCategory[row.category] = row.finishes ?? [];
+    const isCustom = row.category === "other";
+    const value = isCustom ? `custom:${row.id}` : row.category;
+    const label = isCustom
+      ? row.customLabel?.trim() || "Other"
+      : STANDARD_CATEGORY_LABELS[row.category] ?? row.category;
+    config.categories.push({ value, label });
+    config.sizesByCategory[value] = row.sizes ?? [];
+    config.finishesByCategory[value] = row.finishes ?? [];
     if (row.category === "sanitaryware") {
       config.sanitaryItems = row.subItems ?? [];
     }

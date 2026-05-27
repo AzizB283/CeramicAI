@@ -24,14 +24,24 @@ import { DEMO_CLIENT_NAME, ENTRY, STEPS } from "./flows";
  * Empty/missing config = use the hardcoded defaults in flows.ts. This
  * keeps the demo working for un-configured tenants.
  */
+export interface ProductCategoryConfig {
+  /**
+   * Stable identifier used as the chip's `value` and as the key for
+   * sizes/finishes lookup. For the 6 standard categories this is the canonical
+   * slug ("gvt", "pgvt", …); for factory-defined custom categories it's a
+   * synthetic per-row id ("custom:42") so multiple custom rows don't collide.
+   */
+  value: string;
+  /** Chip label shown to the buyer. */
+  label: string;
+}
+
 export interface ProductConfig {
-  /** Category values (matching the static option `value`s) the factory sells. */
-  categories: string[];
-  /** Optional free-text label for category="other" — replaces the default chip label. */
-  customCategoryLabels?: Record<string, string>;
-  /** Sizes the factory offers per category. Empty array = fall back to defaults. */
+  /** Categories the factory sells, with their stable values and display labels. */
+  categories: ProductCategoryConfig[];
+  /** Sizes the factory offers per category value. Empty array = fall back to defaults. */
   sizesByCategory: Record<string, string[]>;
-  /** Finishes the factory offers per category. Empty array = fall back to defaults. */
+  /** Finishes the factory offers per category value. Empty array = fall back to defaults. */
   finishesByCategory: Record<string, string[]>;
   /** Sanitaryware sub-items the factory sells. Empty array = fall back to defaults. */
   sanitaryItems: string[];
@@ -141,21 +151,12 @@ function resolveOptions(
   const fallback = staticOptions ? [...staticOptions] : [];
   if (!products) return fallback;
 
-  // Product category steps: filter the static options to just the ones the
-  // factory sells. Preserve the "Other / Not sure" escape hatch on factory
-  // mode so a buyer can still proceed when nothing matches.
+  // Product category steps: emit chips from the factory's configured list.
+  // The static `step.options` are not used here — the factory's choices fully
+  // define which categories the buyer sees (standard + custom).
   if (stepId === "f_product" || stepId === "x_product") {
     if (products.categories.length === 0) return fallback;
-    const filtered = fallback.filter((o) => {
-      if (o.value === "other") return true; // keep the escape hatch
-      return products.categories.includes((o.value ?? o.label).toString());
-    });
-    // Apply any custom labels (e.g. for category="other" or future custom slots).
-    return filtered.map((o) => {
-      const value = (o.value ?? o.label).toString();
-      const customLabel = products.customCategoryLabels?.[value];
-      return customLabel ? { ...o, label: customLabel } : o;
-    });
+    return products.categories.map((c) => ({ label: c.label, value: c.value }));
   }
 
   // Size step: chips depend on the category the user just picked.

@@ -85,6 +85,7 @@ export default function AdminProducts() {
   const [customSizes, setCustomSizes] = useState<Record<number, string>>({});
   const [customFinishes, setCustomFinishes] = useState<Record<number, string>>({});
   const [customSubItems, setCustomSubItems] = useState<Record<number, string>>({});
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   useEffect(() => {
     if (!rows) return;
@@ -130,6 +131,19 @@ export default function AdminProducts() {
 
   const addCategory = (value: string) => {
     setDrafts((prev) => [...prev, makeDefaultDraft(value)]);
+  };
+
+  // Add a custom category the factory typed in. Stored as category="other"
+  // with the typed text in customLabel — same row shape as a standard
+  // category so the rest of the card UI works without a special case.
+  const addCustomCategory = () => {
+    const label = newCategoryName.trim();
+    if (!label) return;
+    setDrafts((prev) => [
+      ...prev,
+      { ...makeDefaultDraft("other"), customLabel: label },
+    ]);
+    setNewCategoryName("");
   };
 
   const removeCategory = (index: number) => {
@@ -227,7 +241,10 @@ export default function AdminProducts() {
       {drafts.map((draft, index) => {
         const meta = CATEGORIES.find((c) => c.value === draft.category);
         const isSani = draft.category === "sanitaryware";
-        const title = meta?.label ?? draft.category;
+        const isCustom = draft.category === "other";
+        const title = isCustom
+          ? draft.customLabel.trim() || "Custom category"
+          : meta?.label ?? draft.category;
         return (
           <Card key={`${draft.category}-${index}`} data-testid={`product-card-${draft.category}`}>
             <CardHeader className="flex flex-row items-start justify-between space-y-0">
@@ -260,6 +277,20 @@ export default function AdminProducts() {
               </div>
             </CardHeader>
             <CardContent className="space-y-5">
+              {isCustom && (
+                <div className="space-y-2">
+                  <Label htmlFor={`label-${index}`} className="text-sm font-medium">
+                    Category name
+                  </Label>
+                  <Input
+                    id={`label-${index}`}
+                    value={draft.customLabel}
+                    onChange={(e) => updateDraft(index, { customLabel: e.target.value })}
+                    placeholder="e.g. Wooden Planks, Mosaic Tiles"
+                    className="max-w-sm"
+                  />
+                </div>
+              )}
               {!isSani && (
                 <>
                   <ChipPicker
@@ -305,30 +336,58 @@ export default function AdminProducts() {
         );
       })}
 
-      {availableCategories.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Add a category</CardTitle>
-            <CardDescription>
-              Pick a category your factory sells. You can configure its sizes/finishes below.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            {availableCategories.map((c) => (
-              <Button
-                key={c.value}
-                variant="outline"
-                size="sm"
-                onClick={() => addCategory(c.value)}
-                data-testid={`button-add-${c.value}`}
-              >
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                {c.label}
-              </Button>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Add a category</CardTitle>
+          <CardDescription>
+            Pick a standard category, or type your own (e.g. mosaic tiles, wooden planks).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {availableCategories.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {availableCategories.map((c) => (
+                <Button
+                  key={c.value}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => addCategory(c.value)}
+                  data-testid={`button-add-${c.value}`}
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  {c.label}
+                </Button>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <Input
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCustomCategory();
+                }
+              }}
+              placeholder="Custom category name…"
+              className="max-w-xs"
+              data-testid="input-new-category"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addCustomCategory}
+              disabled={!newCategoryName.trim()}
+              data-testid="button-add-custom-category"
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Add custom
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
