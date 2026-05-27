@@ -1,5 +1,11 @@
 import { Router } from "express";
-import type { CeramicClient, CeramicLead, InsertCeramicCatalogue } from "@shared/schema";
+import { z } from "zod";
+import type {
+  CeramicClient,
+  CeramicLead,
+  InsertCeramicCatalogue,
+  InsertCeramicProduct,
+} from "@shared/schema";
 import { insertCeramicCatalogueSchema } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { ensureDemoClient } from "../seed";
@@ -327,4 +333,75 @@ adminRouter.post("/whatsapp/test", async (_req, res) => {
     }
   }
   res.json({ ok: problems.length === 0, problems });
+});
+
+// ── Products (per-factory product configuration) ─────────────────────
+//
+// The admin Products page edits all rows at once, so the PUT endpoint takes
+// the full desired set and we replace the table contents in one transaction.
+// Empty array = factory has no configured products → bot uses the hardcoded
+// defaults in shared/flows.ts.
+
+const PRODUCT_CATEGORIES = [
+  "ceramic_wall",
+  "gvt",
+  "pgvt",
+  "double_charge",
+  "slab",
+  "sanitaryware",
+  "other",
+] as const;
+
+const productItemSchema = z.object({
+  category: z.enum(PRODUCT_CATEGORIES),
+  customLabel: z.string().trim().min(1).max(60).nullable().optional(),
+  sizes: z.array(z.string().trim().min(1).max(40)).max(40).default([]),
+  finishes: z.array(z.string().trim().min(1).max(40)).max(40).default([]),
+  subItems: z.array(z.string().trim().min(1).max(60)).max(40).default([]),
+  isActive: z.boolean().default(true),
+  displayOrder: z.number().int().min(0).max(999).default(0),
+});
+
+const productsPutSchema = z.object({
+  items: z.array(productItemSchema).max(20),
+});
+
+// GET /api/admin/products → list current factory's product rows
+adminRouter.get("/products", async (_req, res) => {
+  const clientId = await ensureDemoClient();
+  const rows = await runWithClient(clientId, () => storage.getProducts());
+  res.json(rows);
+});
+
+// PUT /api/admin/products { items: [...] } → replace the full set
+adminRouter.put("/products", async (req, res) => {
+  const parsed = productsPutSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid body", details: parsed.error.flatten() });
+  }
+
+  // Reject duplicate categories — each category can have only one row per
+  // factory, and the wipe-and-reinsert pattern wouldn't catch the conflict
+  // gracefully without a unique constraint we deliberately don't have (so
+  // we can add multiple "other"s later if needed).
+  const seen = new Set<string>();
+  for (const it of parsed.data.items) {
+    if (it.category !== "other" && seen.has(it.category)) {
+      return res.status(400).json({ error: `duplicate category: ${it.category}` });
+    }
+    seen.add(it.category);
+  }
+
+  const clientId = await ensureDemoClient();
+  const toInsert: InsertCeramicProduct[] = parsed.data.items.map((it) => ({
+    category: it.category,
+    customLabel: it.customLabel ?? null,
+    sizes: it.sizes,
+    finishes: it.finishes,
+    subItems: it.subItems,
+    isActive: it.isActive,
+    displayOrder: it.displayOrder,
+  }));
+  const rows = await storage.replaceProducts(clientId, toInsert);
+  res.json(rows);
 });

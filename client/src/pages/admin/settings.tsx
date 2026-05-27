@@ -24,6 +24,7 @@ interface CeramicSettings {
   ownerWhatsapp: string | null;
   catalogUrl: string | null;
   exportCatalogUrl: string | null;
+  widgetName: string | null;
   widgetGreeting: string | null;
   widgetColor: string | null;
   timezone: string | null;
@@ -36,7 +37,9 @@ type SettingsForm = {
   ownerWhatsapp: string;
   catalogUrl: string;
   exportCatalogUrl: string;
+  widgetName: string;
   widgetGreeting: string;
+  widgetColor: string;
 };
 
 const EMPTY_FORM: SettingsForm = {
@@ -45,7 +48,9 @@ const EMPTY_FORM: SettingsForm = {
   ownerWhatsapp: "",
   catalogUrl: "",
   exportCatalogUrl: "",
+  widgetName: "",
   widgetGreeting: "",
+  widgetColor: "e85d04",
 };
 
 export default function AdminSettings() {
@@ -64,7 +69,9 @@ export default function AdminSettings() {
         ownerWhatsapp: settings.ownerWhatsapp ?? "",
         catalogUrl: settings.catalogUrl ?? "",
         exportCatalogUrl: settings.exportCatalogUrl ?? "",
+        widgetName: settings.widgetName ?? "",
         widgetGreeting: settings.widgetGreeting ?? "",
+        widgetColor: settings.widgetColor ?? "e85d04",
       });
     }
   }, [settings]);
@@ -192,12 +199,27 @@ export default function AdminSettings() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Widget</CardTitle>
-            <CardDescription>The greeting shown when the chat opens.</CardDescription>
+            <CardTitle>Chat widget</CardTitle>
+            <CardDescription>
+              Brand the bot to match your factory — name, greeting, and theme color.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="widgetGreeting">Widget greeting</Label>
+              <Label htmlFor="widgetName">Bot name</Label>
+              <Input
+                id="widgetName"
+                value={form.widgetName}
+                onChange={set("widgetName")}
+                placeholder="CeramicBot"
+                data-testid="input-widget-name"
+              />
+              <p className="text-xs text-muted-foreground">
+                Shown in the chat header and the floating button. Defaults to "CeramicBot".
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="widgetGreeting">Welcome message</Label>
               <Textarea
                 id="widgetGreeting"
                 value={form.widgetGreeting}
@@ -206,6 +228,40 @@ export default function AdminSettings() {
                 rows={3}
                 data-testid="input-widget-greeting"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="widgetColor">Theme color</Label>
+              <div className="flex items-center gap-3">
+                <input
+                  id="widgetColor"
+                  type="color"
+                  value={`#${form.widgetColor.replace(/^#/, "")}`}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, widgetColor: e.target.value.replace(/^#/, "") }))
+                  }
+                  className="h-10 w-14 cursor-pointer rounded-md border bg-background"
+                  data-testid="input-widget-color"
+                />
+                <Input
+                  value={form.widgetColor}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      widgetColor: e.target.value.replace(/^#/, "").slice(0, 6),
+                    }))
+                  }
+                  placeholder="e85d04"
+                  maxLength={6}
+                  className="font-mono w-32"
+                />
+                <div
+                  className="h-10 flex-1 rounded-md border"
+                  style={{ backgroundColor: `#${form.widgetColor || "e85d04"}` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Hex without the #. Used for the chat button, user bubbles, and accents.
+              </p>
             </div>
           </CardContent>
         </Card>

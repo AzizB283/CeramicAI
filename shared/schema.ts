@@ -158,3 +158,41 @@ export const insertCeramicCatalogueSchema = createInsertSchema(ceramicCatalogues
 });
 export type CeramicCatalogue = typeof ceramicCatalogues.$inferSelect;
 export type InsertCeramicCatalogue = z.infer<typeof insertCeramicCatalogueSchema>;
+
+// ── ceramic_products — per-factory product configuration ────────────────
+// Drives which categories/sizes/finishes the bot chips offer for a given
+// factory. A factory with zero rows falls back to the hardcoded defaults in
+// shared/flows.ts (so un-configured demos keep working). Sanitaryware rows
+// additionally carry sub-items (toilet, wash basin, urinal…) since asking
+// "what size" is wrong for those — we ask "which item" instead.
+export const ceramicProducts = pgTable(
+  "ceramic_products",
+  {
+    id: serial("id").primaryKey(),
+    clientId: uuid("client_id").notNull().references(() => ceramicClients.id),
+    category: text("category").notNull(), // ceramic_wall | gvt | pgvt | double_charge | slab | sanitaryware | other
+    customLabel: text("custom_label"), // free-text label when category='other'
+    sizes: jsonb("sizes").$type<string[]>().default([]).notNull(),
+    finishes: jsonb("finishes").$type<string[]>().default([]).notNull(),
+    // Sanitaryware sub-items (one-piece toilet, wash basin, urinal, etc.).
+    // Empty for tile categories.
+    subItems: jsonb("sub_items").$type<string[]>().default([]).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    displayOrder: integer("display_order").default(0).notNull(),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [
+    index("idx_ceramic_products_client_id").on(t.clientId),
+    index("idx_ceramic_products_client_active").on(t.clientId, t.isActive),
+  ],
+);
+
+export const insertCeramicProductSchema = createInsertSchema(ceramicProducts).omit({
+  id: true,
+  clientId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type CeramicProduct = typeof ceramicProducts.$inferSelect;
+export type InsertCeramicProduct = z.infer<typeof insertCeramicProductSchema>;

@@ -87,6 +87,8 @@ export interface LeadDraft {
   /** Captured automatically on WhatsApp from the sender's number. */
   buyerPhone?: string;
   priority?: "normal" | "high" | "priority";
+  /** Sub-item when productCategory === "sanitaryware" (toilet, wash basin, …). */
+  sanitaryItem?: string;
 }
 
 /**
@@ -97,6 +99,7 @@ export type StepId =
   // factory mode
   | "f_welcome"
   | "f_product"
+  | "f_sani_item"
   | "f_size"
   | "f_finish"
   | "f_quantity"
@@ -107,6 +110,7 @@ export type StepId =
   // exporter mode
   | "x_welcome"
   | "x_product"
+  | "x_sani_item"
   | "x_spec"
   | "x_quantity"
   | "x_country"

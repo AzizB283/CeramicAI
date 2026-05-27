@@ -1,7 +1,12 @@
 import { Router } from "express";
 import type { Mode, LeadDraft } from "@shared/types";
-import type { InsertCeramicLead } from "@shared/schema";
-import { startFlow, advanceFlow, type FlowSnapshot } from "@shared/flowEngine";
+import type { CeramicProduct, InsertCeramicLead } from "@shared/schema";
+import {
+  startFlow,
+  advanceFlow,
+  type FlowSnapshot,
+  type ProductConfig,
+} from "@shared/flowEngine";
 import {
   createSession,
   getSession,
@@ -94,14 +99,48 @@ async function resolveFactoryName(): Promise<string> {
   return client?.name ?? "Shree Tiles Pvt Ltd";
 }
 
+/**
+ * Build the ProductConfig the engine consumes from the rows the admin
+ * configured. Returns undefined when the factory has zero rows — the engine
+ * then falls back to the hardcoded defaults in flows.ts.
+ */
+function buildProductConfig(rows: CeramicProduct[]): ProductConfig | undefined {
+  const active = rows.filter((r) => r.isActive);
+  if (active.length === 0) return undefined;
+  const config: ProductConfig = {
+    categories: [],
+    customCategoryLabels: {},
+    sizesByCategory: {},
+    finishesByCategory: {},
+    sanitaryItems: [],
+  };
+  for (const row of active) {
+    config.categories.push(row.category);
+    if (row.customLabel) config.customCategoryLabels![row.category] = row.customLabel;
+    config.sizesByCategory[row.category] = row.sizes ?? [];
+    config.finishesByCategory[row.category] = row.finishes ?? [];
+    if (row.category === "sanitaryware") {
+      config.sanitaryItems = row.subItems ?? [];
+    }
+  }
+  return config;
+}
+
+async function resolveProductConfig(): Promise<ProductConfig | undefined> {
+  const clientId = await ensureDemoClient();
+  const rows = await runWithClient(clientId, () => storage.getProducts());
+  return buildProductConfig(rows);
+}
+
 export const chatRouter = Router();
 
 // POST /api/chat/session  { mode } → { sessionId, ...snapshot }
 chatRouter.post("/session", async (req, res) => {
   const mode: Mode = req.body?.mode === "exporter" ? "exporter" : "factory";
   const factoryName = await resolveFactoryName();
+  const products = await resolveProductConfig();
 
-  const initial = await attachCatalogueUrl(startFlow(mode), mode);
+  const initial = await attachCatalogueUrl(startFlow(mode, products), mode);
   // Fresh session has no history — the welcome turn is bot-only.
   const narrated = await narrateSnapshot(initial, mode, [], factoryName);
 
@@ -133,12 +172,14 @@ chatRouter.post("/message", async (req, res) => {
   const userTurnText = (text ?? choiceLabel ?? "").toString().trim();
   if (userTurnText) appendHistory(sessionId, { role: "user", text: userTurnText });
 
+  const products = await resolveProductConfig();
   const advanced = advanceFlow({
     mode: session.mode,
     stepId: session.stepId,
     lead: session.lead,
     choiceLabel,
     text,
+    products,
   });
 
   // "Start over": treat as a fresh welcome — re-narrate from scratch with no

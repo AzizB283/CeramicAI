@@ -13,6 +13,30 @@
 import type { LeadDraft, Mode, QuickReply, StepId } from "./types";
 import { DEMO_CLIENT_NAME, ENTRY, STEPS } from "./flows";
 
+/**
+ * Per-factory product configuration. The server loads this from
+ * ceramic_products and passes it into start/advance — when present, the
+ * engine swaps the hardcoded option lists on `f_product` / `x_product` /
+ * `f_size` / `f_finish` / `f_sani_item` / `x_sani_item` steps for the
+ * factory's actual offerings, and reroutes "sanitaryware" through the
+ * sub-item step (skipping size/finish, which are tile-only).
+ *
+ * Empty/missing config = use the hardcoded defaults in flows.ts. This
+ * keeps the demo working for un-configured tenants.
+ */
+export interface ProductConfig {
+  /** Category values (matching the static option `value`s) the factory sells. */
+  categories: string[];
+  /** Optional free-text label for category="other" — replaces the default chip label. */
+  customCategoryLabels?: Record<string, string>;
+  /** Sizes the factory offers per category. Empty array = fall back to defaults. */
+  sizesByCategory: Record<string, string[]>;
+  /** Finishes the factory offers per category. Empty array = fall back to defaults. */
+  finishesByCategory: Record<string, string[]>;
+  /** Sanitaryware sub-items the factory sells. Empty array = fall back to defaults. */
+  sanitaryItems: string[];
+}
+
 export interface OwnerAlert {
   priority: boolean;
   lines: string[];
@@ -45,6 +69,7 @@ export interface AdvanceInput {
   lead: LeadDraft;
   choiceLabel?: string;
   text?: string;
+  products?: ProductConfig;
 }
 
 /** Fill {client} / {name} placeholders in bot copy. */
@@ -99,13 +124,77 @@ function buildOwnerAlert(mode: Mode, l: LeadDraft): OwnerAlert {
   };
 }
 
-function snapshot(mode: Mode, stepId: StepId, lead: LeadDraft): FlowSnapshot {
+/**
+ * Resolve the quick-reply chips for a given step, applying per-factory
+ * product config when set. The static `step.options` are the fallback used
+ * when products aren't configured.
+ *
+ * Returns the static options unchanged for steps that aren't product-driven
+ * (welcome, quantity, country, incoterms, etc.).
+ */
+function resolveOptions(
+  stepId: StepId,
+  staticOptions: QuickReply[] | undefined,
+  lead: LeadDraft,
+  products?: ProductConfig,
+): QuickReply[] {
+  const fallback = staticOptions ? [...staticOptions] : [];
+  if (!products) return fallback;
+
+  // Product category steps: filter the static options to just the ones the
+  // factory sells. Preserve the "Other / Not sure" escape hatch on factory
+  // mode so a buyer can still proceed when nothing matches.
+  if (stepId === "f_product" || stepId === "x_product") {
+    if (products.categories.length === 0) return fallback;
+    const filtered = fallback.filter((o) => {
+      if (o.value === "other") return true; // keep the escape hatch
+      return products.categories.includes((o.value ?? o.label).toString());
+    });
+    // Apply any custom labels (e.g. for category="other" or future custom slots).
+    return filtered.map((o) => {
+      const value = (o.value ?? o.label).toString();
+      const customLabel = products.customCategoryLabels?.[value];
+      return customLabel ? { ...o, label: customLabel } : o;
+    });
+  }
+
+  // Size step: chips depend on the category the user just picked.
+  if (stepId === "f_size") {
+    const cat = lead.productCategory;
+    const sizes = cat ? products.sizesByCategory[cat] : undefined;
+    if (!sizes || sizes.length === 0) return fallback;
+    return sizes.map((s) => ({ label: s }));
+  }
+
+  // Finish step: same — per-category.
+  if (stepId === "f_finish") {
+    const cat = lead.productCategory;
+    const finishes = cat ? products.finishesByCategory[cat] : undefined;
+    if (!finishes || finishes.length === 0) return fallback;
+    return finishes.map((f) => ({ label: f }));
+  }
+
+  // Sanitaryware sub-items (both modes).
+  if (stepId === "f_sani_item" || stepId === "x_sani_item") {
+    if (products.sanitaryItems.length === 0) return fallback;
+    return products.sanitaryItems.map((s) => ({ label: s }));
+  }
+
+  return fallback;
+}
+
+function snapshot(
+  mode: Mode,
+  stepId: StepId,
+  lead: LeadDraft,
+  products?: ProductConfig,
+): FlowSnapshot {
   const step = STEPS[stepId];
   return {
     stepId,
     lead,
     botMessages: step.bot.map((line) => render(line, mode, lead)),
-    quickReplies: step.options ? [...step.options] : [],
+    quickReplies: resolveOptions(stepId, step.options, lead, products),
     inputKind: step.input === "text" ? "text" : "choice",
     placeholder: step.placeholder,
     catalog: step.catalog,
@@ -115,9 +204,21 @@ function snapshot(mode: Mode, stepId: StepId, lead: LeadDraft): FlowSnapshot {
   };
 }
 
+/**
+ * Decide where to go after the user picks a category. Sanitaryware reroutes
+ * through the sub-item step (which asks "which item?" instead of size/finish).
+ * Other categories follow the static `next`.
+ */
+function rerouteAfterCategory(mode: Mode, lead: LeadDraft, staticNext: StepId | undefined): StepId | undefined {
+  if (lead.productCategory === "sanitaryware") {
+    return mode === "factory" ? "f_sani_item" : "x_sani_item";
+  }
+  return staticNext;
+}
+
 /** Begin (or restart) the conversation for a mode. */
-export function startFlow(mode: Mode): FlowSnapshot {
-  return snapshot(mode, ENTRY[mode], {});
+export function startFlow(mode: Mode, products?: ProductConfig): FlowSnapshot {
+  return snapshot(mode, ENTRY[mode], {}, products);
 }
 
 /**
@@ -126,29 +227,40 @@ export function startFlow(mode: Mode): FlowSnapshot {
  * returns the current step unchanged.
  */
 export function advanceFlow(input: AdvanceInput): FlowSnapshot {
-  const { mode, stepId, choiceLabel, text } = input;
+  const { mode, stepId, choiceLabel, text, products } = input;
   const step = STEPS[stepId];
   const lead: LeadDraft = { ...input.lead };
 
   if (choiceLabel !== undefined) {
-    const opt = (step.options ?? []).find((o) => o.label === choiceLabel);
-    if (!opt) return snapshot(mode, stepId, lead);
+    // Look up against the *resolved* options (which may be the per-factory
+    // ones) so a chip the buyer actually sees can be matched.
+    const resolvedOptions = resolveOptions(stepId, step.options, lead, products);
+    let opt = resolvedOptions.find((o) => o.label === choiceLabel);
+    // Fall back to the static option list too — handy when the LLM proposes
+    // a chip label the user picks but the resolved list didn't contain.
+    if (!opt) opt = (step.options ?? []).find((o) => o.label === choiceLabel);
+    if (!opt) return snapshot(mode, stepId, lead, products);
     if (step.field) lead[step.field] = (opt.value ?? opt.label) as never;
     if (opt.priority) lead.priority = "priority";
-    const next = opt.next ?? step.next;
-    if (!next) return snapshot(mode, stepId, lead);
+    let next = opt.next ?? step.next;
+    // After picking a product category, reroute through the sanitaryware
+    // sub-item step when applicable. Other category picks follow `next`.
+    if (stepId === "f_product" || stepId === "x_product") {
+      next = rerouteAfterCategory(mode, lead, next);
+    }
+    if (!next) return snapshot(mode, stepId, lead, products);
     if (next === ENTRY[mode] && step.terminal)
-      return { ...startFlow(mode), startOver: true };
-    return snapshot(mode, next, lead);
+      return { ...startFlow(mode, products), startOver: true };
+    return snapshot(mode, next, lead, products);
   }
 
   if (text !== undefined) {
     const trimmed = text.trim();
-    if (!trimmed) return snapshot(mode, stepId, lead);
+    if (!trimmed) return snapshot(mode, stepId, lead, products);
     if (step.field) lead[step.field] = trimmed as never;
-    if (step.next) return snapshot(mode, step.next, lead);
-    return snapshot(mode, stepId, lead);
+    if (step.next) return snapshot(mode, step.next, lead, products);
+    return snapshot(mode, stepId, lead, products);
   }
 
-  return snapshot(mode, stepId, lead);
+  return snapshot(mode, stepId, lead, products);
 }

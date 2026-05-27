@@ -21,6 +21,8 @@ export const STEP_INTENTS: Record<StepId, string> = {
     "Greet the buyer warmly (mention {client} is a ceramic tile manufacturer in Morbi). Ask what type of buyer they are. They'll pick from the chips shown.",
   f_product:
     "Acknowledge their buyer type briefly. Ask which product category they're looking for. Chips list the categories.",
+  f_sani_item:
+    "Acknowledge they picked sanitaryware. Ask which item they're looking for — chips list toilets, wash basins, urinal, cistern, bidet, etc. No size question for sanitaryware.",
   f_size:
     "Ask what tile size they need. Chips list standard sizes (300×600 up to 1200×1200).",
   f_finish:
@@ -41,6 +43,8 @@ export const STEP_INTENTS: Record<StepId, string> = {
     "Greet the international buyer warmly (mention {client} is a Morbi-based ceramic tile exporter). Ask how you can help — chips list the 5 paths (quote / catalogue / samples / order query / become a distributor).",
   x_product:
     "Acknowledge their intent briefly. Ask which product category — chips list the export categories.",
+  x_sani_item:
+    "Acknowledge they picked sanitaryware. Ask which item — chips list toilets, wash basins, urinal, cistern, bidet. Skip the size question for sanitaryware.",
   x_spec:
     "Ask what size and finish they're looking for. They'll type a free-text answer.",
   x_quantity:

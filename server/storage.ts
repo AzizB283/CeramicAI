@@ -6,6 +6,7 @@ import {
   ceramicLeads,
   ceramicFollowups,
   ceramicCatalogues,
+  ceramicProducts,
   type CeramicClient,
   type InsertCeramicClient,
   type CeramicLead,
@@ -14,6 +15,8 @@ import {
   type InsertCeramicFollowup,
   type CeramicCatalogue,
   type InsertCeramicCatalogue,
+  type CeramicProduct,
+  type InsertCeramicProduct,
 } from "@shared/schema";
 import { encrypt, decrypt, isEncrypted, hashPhone } from "./utils/encryption";
 
@@ -230,6 +233,36 @@ export const storage = {
     await db
       .delete(ceramicCatalogues)
       .where(and(eq(ceramicCatalogues.id, id), scope(ceramicCatalogues.clientId)));
+  },
+
+  // products — per-factory category/size/finish/sub-item configuration that
+  // overrides the hardcoded defaults in shared/flows.ts. Zero rows means
+  // "use defaults" (clinic-style show-all fallback).
+  async getProducts(): Promise<CeramicProduct[]> {
+    return db
+      .select()
+      .from(ceramicProducts)
+      .where(scope(ceramicProducts.clientId))
+      .orderBy(asc(ceramicProducts.displayOrder), asc(ceramicProducts.id));
+  },
+
+  // Replace the entire product set for the current client. We use a "wipe
+  // and reinsert" pattern instead of per-row upserts because the admin UI
+  // edits all categories at once — the form state IS the desired DB state.
+  // Simpler than tracking per-row diffs; small data volume per tenant.
+  //
+  // Requires an explicit tenant scope (even in single mode, the demo client
+  // id is known). The scope predicate guarantees we never wipe another
+  // tenant's products in multi mode.
+  async replaceProducts(clientId: string, items: InsertCeramicProduct[]): Promise<CeramicProduct[]> {
+    return db.transaction(async (tx) => {
+      await tx
+        .delete(ceramicProducts)
+        .where(eq(ceramicProducts.clientId, clientId));
+      if (items.length === 0) return [];
+      const rows = items.map((it) => ({ ...it, clientId }) as typeof ceramicProducts.$inferInsert);
+      return tx.insert(ceramicProducts).values(rows).returning();
+    });
   },
 };
 
