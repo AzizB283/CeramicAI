@@ -56,30 +56,42 @@ const BCRYPT_ROUNDS = 12;
  */
 export async function seedAdminUsers(): Promise<void> {
   // ── superadmin ──
-  const superCount = await storage.countAdminsByRole("superadmin");
-  if (superCount === 0) {
-    const username = process.env.SUPERADMIN_USERNAME ?? "superadmin";
-    const existing = await storage.getAdminUserByUsername(username);
-    if (!existing) {
-      const envPw = process.env.SUPERADMIN_PASSWORD;
-      const password = envPw ?? crypto.randomBytes(12).toString("base64url");
-      await storage.createAdminUser({
-        clientId: null,
-        username,
-        password: await bcrypt.hash(password, BCRYPT_ROUNDS),
-        name: "Super Admin",
-        role: "superadmin",
-        active: true,
+  const username = process.env.SUPERADMIN_USERNAME ?? "superadmin";
+  const envPw = process.env.SUPERADMIN_PASSWORD;
+  const existing = await storage.getAdminUserByUsername(username);
+
+  if (!existing) {
+    // First boot for this superadmin username — create it.
+    const password = envPw ?? crypto.randomBytes(12).toString("base64url");
+    await storage.createAdminUser({
+      clientId: null,
+      username,
+      password: await bcrypt.hash(password, BCRYPT_ROUNDS),
+      name: "Super Admin",
+      role: "superadmin",
+      active: true,
+    });
+    if (envPw) {
+      console.log(`[seed] superadmin created (username: ${username})`);
+    } else {
+      // Printed ONCE, never written to a file. Operator must copy it now.
+      console.log(
+        `[seed] superadmin created — username: ${username}  password: ${password}\n` +
+          `[seed] ^ set SUPERADMIN_PASSWORD to control this; copy it now, it won't be shown again.`,
+      );
+    }
+  } else if (envPw && existing.role === "superadmin") {
+    // The superadmin already exists. Treat SUPERADMIN_PASSWORD as the source of
+    // truth: if it's set and doesn't match the stored hash, re-sync it. This
+    // makes "set the env var and redeploy" actually change the password (the
+    // earlier create-only behaviour silently ignored env changes after the
+    // first boot). No-op when the password already matches.
+    const matches = await bcrypt.compare(envPw, existing.password);
+    if (!matches) {
+      await storage.updateAdminUser(existing.id, {
+        password: await bcrypt.hash(envPw, BCRYPT_ROUNDS),
       });
-      if (envPw) {
-        console.log(`[seed] superadmin created (username: ${username})`);
-      } else {
-        // Printed ONCE, never written to a file. Operator must copy it now.
-        console.log(
-          `[seed] superadmin created — username: ${username}  password: ${password}\n` +
-            `[seed] ^ set SUPERADMIN_PASSWORD to control this; copy it now, it won't be shown again.`,
-        );
-      }
+      console.log(`[seed] superadmin password re-synced from SUPERADMIN_PASSWORD (username: ${username})`);
     }
   }
 
