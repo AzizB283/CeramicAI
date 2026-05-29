@@ -8,6 +8,9 @@ import { useAuth } from "@/hooks/use-auth";
 
 import { AdminLayout } from "@/components/admin-layout";
 import { SuperAdminLayout } from "@/components/superadmin-layout";
+import LandingPage from "@/pages/landing";
+import FeaturesPage from "@/pages/features";
+import AboutPage from "@/pages/about";
 import DemoChat from "@/pages/demo";
 import EmbedChat from "@/pages/embed-chat";
 import LoginPage from "@/pages/login";
@@ -66,9 +69,16 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
 function Router() {
   return (
     <Switch>
-      {/* Public demo */}
-      <Route path="/" component={DemoChat} />
-      {/* Embeddable / standalone chat page (no chrome, iframe-friendly) */}
+      {/* Public marketing site */}
+      <Route path="/" component={LandingPage} />
+      <Route path="/features" component={FeaturesPage} />
+      <Route path="/about" component={AboutPage} />
+
+      {/* Chatbot — gated off the public site to protect the OpenAI key.
+          /demo is reachable (for in-panel/internal demos) but not linked
+          from the marketing pages. /chat stays for the embeddable widget +
+          iframe on factory websites (driven by ?client=<slug>). */}
+      <Route path="/demo" component={DemoChat} />
       <Route path="/chat" component={EmbedChat} />
       <Route path="/login" component={LoginPage} />
 
