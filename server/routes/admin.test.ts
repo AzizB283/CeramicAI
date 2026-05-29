@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
 import { buildApp } from "../app";
 import { pool } from "../db";
-import { ensureDemoClient } from "../seed";
+import { ensureDemoClient, seedAdminUsers } from "../seed";
 import { runWithClient } from "../middleware/tenant";
 import { storage } from "../storage";
 
@@ -15,6 +15,9 @@ const SESSION_ID = "admin-test-lead";
 let leadId: number;
 
 beforeAll(async () => {
+  // Auth is now DB-backed: ensure the demo factory admin (admin/admin123)
+  // exists so the login assertions below pass on a fresh test DB.
+  await seedAdminUsers();
   // Seed one lead so the list/stats are non-empty.
   const clientId = await ensureDemoClient();
   const lead = await runWithClient(clientId, () =>

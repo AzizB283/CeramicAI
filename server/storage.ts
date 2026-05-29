@@ -7,6 +7,8 @@ import {
   ceramicFollowups,
   ceramicCatalogues,
   ceramicProducts,
+  adminUsers,
+  superadminActions,
   type CeramicClient,
   type InsertCeramicClient,
   type CeramicLead,
@@ -17,6 +19,9 @@ import {
   type InsertCeramicCatalogue,
   type CeramicProduct,
   type InsertCeramicProduct,
+  type AdminUser,
+  type InsertAdminUser,
+  type InsertSuperadminAction,
 } from "@shared/schema";
 import { encrypt, decrypt, isEncrypted, hashPhone } from "./utils/encryption";
 
@@ -244,6 +249,56 @@ export const storage = {
       .from(ceramicProducts)
       .where(scope(ceramicProducts.clientId))
       .orderBy(asc(ceramicProducts.displayOrder), asc(ceramicProducts.id));
+  },
+
+  // ── admin users (panel logins) ───────────────────────────────────────
+  // These are NOT tenant-scoped through scope(): admin_users is the auth
+  // root. Username is globally unique. The superadmin row has clientId=null.
+  // Cross-tenant methods here are only reached from the auth layer and the
+  // superadmin router (behind requireSuperAdmin).
+  async getAdminUserByUsername(username: string): Promise<AdminUser | undefined> {
+    const [row] = await db
+      .select()
+      .from(adminUsers)
+      .where(eq(adminUsers.username, username))
+      .limit(1);
+    return row;
+  },
+
+  async getAdminUser(id: string): Promise<AdminUser | undefined> {
+    const [row] = await db.select().from(adminUsers).where(eq(adminUsers.id, id)).limit(1);
+    return row;
+  },
+
+  async createAdminUser(input: InsertAdminUser): Promise<AdminUser> {
+    const [row] = await db.insert(adminUsers).values(input).returning();
+    return row;
+  },
+
+  // Count admins for a role (used by seed bootstrap to decide whether to
+  // create the initial superadmin). Cross-tenant by design.
+  async countAdminsByRole(role: string): Promise<number> {
+    const rows = await db.select({ id: adminUsers.id }).from(adminUsers).where(eq(adminUsers.role, role));
+    return rows.length;
+  },
+
+  async getAdminsForClient(clientId: string): Promise<AdminUser[]> {
+    return db
+      .select()
+      .from(adminUsers)
+      .where(eq(adminUsers.clientId, clientId))
+      .orderBy(asc(adminUsers.createdAt));
+  },
+
+  async updateAdminUser(id: string, patch: Partial<InsertAdminUser>): Promise<AdminUser> {
+    const [row] = await db.update(adminUsers).set(patch).where(eq(adminUsers.id, id)).returning();
+    if (!row) throw new Error(`Admin user ${id} not found`);
+    return row;
+  },
+
+  // ── superadmin audit log ─────────────────────────────────────────────
+  async logSuperadminAction(input: InsertSuperadminAction): Promise<void> {
+    await db.insert(superadminActions).values(input);
   },
 
   // Replace the entire product set for the current client. We use a "wipe

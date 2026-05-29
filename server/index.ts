@@ -3,7 +3,7 @@
 import "./env";
 
 import { buildApp } from "./app";
-import { ensureDemoClient } from "./seed";
+import { ensureDemoClient, seedAdminUsers } from "./seed";
 import { runMigrations } from "./db";
 
 const PORT = Number(process.env.PORT ?? 5000);
@@ -16,7 +16,8 @@ async function main() {
   // clinic-ai's pattern.
   await runMigrations();
 
-  await ensureDemoClient(); // seed before accepting traffic
+  await ensureDemoClient(); // seed the demo factory before accepting traffic
+  await seedAdminUsers(); // bootstrap superadmin + demo factory-admin logins
 
   const app = buildApp();
   app.listen(PORT, () => {

@@ -196,3 +196,54 @@ export const insertCeramicProductSchema = createInsertSchema(ceramicProducts).om
 });
 export type CeramicProduct = typeof ceramicProducts.$inferSelect;
 export type InsertCeramicProduct = z.infer<typeof insertCeramicProductSchema>;
+
+// ── admin_users — panel logins (super-admin + per-factory admins) ───────
+// Mirrors clinic-ai's admin_users (minus the doctor role). The "superadmin"
+// role is Aurex Auto's cross-tenant operator: clientId is NULL. A "factory"
+// admin is bound to exactly one ceramic_clients row via clientId. Usernames
+// are globally unique. password is a bcrypt hash, never plaintext.
+export const adminUsers = pgTable(
+  "admin_users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clientId: uuid("client_id").references(() => ceramicClients.id), // NULL for superadmin
+    username: text("username").notNull().unique(),
+    password: text("password").notNull(), // bcrypt hash
+    name: text("name"),
+    role: text("role").notNull().default("factory"), // "superadmin" | "factory"
+    active: boolean("active").default(true).notNull(),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [index("idx_admin_users_client_id").on(t.clientId)],
+);
+
+export const insertAdminUserSchema = createInsertSchema(adminUsers).omit({
+  id: true,
+  createdAt: true,
+});
+export type AdminUser = typeof adminUsers.$inferSelect;
+export type InsertAdminUser = z.infer<typeof insertAdminUserSchema>;
+
+// ── superadmin_actions — audit trail of super-admin impersonation ───────
+// Decision A: super-admin can enter a factory's panel and see buyer-lead PII;
+// every impersonation session and every PII-bearing read while impersonating
+// is logged here for accountability. DB-only for v1 (no UI surface yet).
+export const superadminActions = pgTable(
+  "superadmin_actions",
+  {
+    id: serial("id").primaryKey(),
+    superadminId: uuid("superadmin_id").notNull().references(() => adminUsers.id),
+    clientId: uuid("client_id").references(() => ceramicClients.id), // target factory
+    action: text("action").notNull(), // impersonate_start | impersonate_stop | view_leads | ...
+    detail: text("detail"),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [index("idx_superadmin_actions_client").on(t.clientId)],
+);
+
+export const insertSuperadminActionSchema = createInsertSchema(superadminActions).omit({
+  id: true,
+  createdAt: true,
+});
+export type SuperadminAction = typeof superadminActions.$inferSelect;
+export type InsertSuperadminAction = z.infer<typeof insertSuperadminActionSchema>;

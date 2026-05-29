@@ -1,3 +1,5 @@
+import bcrypt from "bcryptjs";
+import crypto from "node:crypto";
 import { db } from "./db";
 import { ceramicClients } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -35,4 +37,66 @@ export async function ensureDemoClient(): Promise<string> {
   });
   cachedId = created.id;
   return cachedId;
+}
+
+const BCRYPT_ROUNDS = 12;
+
+/**
+ * Bootstrap the panel logins. Idempotent — safe to run every boot.
+ *
+ *  1. A cross-tenant **superadmin** (Aurex Auto operator). Created from
+ *     SUPERADMIN_USERNAME / SUPERADMIN_PASSWORD env, or a generated password
+ *     printed once to stdout if no password is set. clientId is null.
+ *  2. A **factory admin** bound to the demo client, seeded from the existing
+ *     ADMIN_USERNAME / ADMIN_PASSWORD env (defaults admin / admin123) so the
+ *     current demo login keeps working after the auth migration.
+ *
+ * Nothing is overwritten: if a user with the target username already exists we
+ * leave it untouched (so a manually-changed password isn't clobbered).
+ */
+export async function seedAdminUsers(): Promise<void> {
+  // ── superadmin ──
+  const superCount = await storage.countAdminsByRole("superadmin");
+  if (superCount === 0) {
+    const username = process.env.SUPERADMIN_USERNAME ?? "superadmin";
+    const existing = await storage.getAdminUserByUsername(username);
+    if (!existing) {
+      const envPw = process.env.SUPERADMIN_PASSWORD;
+      const password = envPw ?? crypto.randomBytes(12).toString("base64url");
+      await storage.createAdminUser({
+        clientId: null,
+        username,
+        password: await bcrypt.hash(password, BCRYPT_ROUNDS),
+        name: "Super Admin",
+        role: "superadmin",
+        active: true,
+      });
+      if (envPw) {
+        console.log(`[seed] superadmin created (username: ${username})`);
+      } else {
+        // Printed ONCE, never written to a file. Operator must copy it now.
+        console.log(
+          `[seed] superadmin created — username: ${username}  password: ${password}\n` +
+            `[seed] ^ set SUPERADMIN_PASSWORD to control this; copy it now, it won't be shown again.`,
+        );
+      }
+    }
+  }
+
+  // ── demo factory admin (keeps the existing demo login working) ──
+  const demoUsername = process.env.ADMIN_USERNAME ?? "admin";
+  const existingDemoAdmin = await storage.getAdminUserByUsername(demoUsername);
+  if (!existingDemoAdmin) {
+    const demoClientId = await ensureDemoClient();
+    const demoPassword = process.env.ADMIN_PASSWORD ?? "admin123";
+    await storage.createAdminUser({
+      clientId: demoClientId,
+      username: demoUsername,
+      password: await bcrypt.hash(demoPassword, BCRYPT_ROUNDS),
+      name: "Demo Factory Admin",
+      role: "factory",
+      active: true,
+    });
+    console.log(`[seed] demo factory admin created (username: ${demoUsername})`);
+  }
 }
