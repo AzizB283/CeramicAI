@@ -6,6 +6,12 @@ export interface SessionState {
   mode: Mode;
   stepId: StepId;
   lead: LeadDraft;
+  /**
+   * The tenant this conversation belongs to. Resolved once at session start
+   * from the embed's ?client=<slug> (falling back to the demo client) and
+   * pinned for the life of the session so later turns stay on the same factory.
+   */
+  clientId: string;
 }
 
 interface StoredSession extends SessionState {

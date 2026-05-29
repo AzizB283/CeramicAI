@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { useAuth } from "@/hooks/use-auth";
 
 import { AdminLayout } from "@/components/admin-layout";
+import { SuperAdminLayout } from "@/components/superadmin-layout";
 import DemoChat from "@/pages/demo";
 import EmbedChat from "@/pages/embed-chat";
 import LoginPage from "@/pages/login";
@@ -18,6 +19,8 @@ import AdminCatalogues from "@/pages/admin/catalogues";
 import AdminChatWidget from "@/pages/admin/chat-widget";
 import AdminIntegrations from "@/pages/admin/integrations";
 import AdminSettings from "@/pages/admin/settings";
+import SuperAdminClients from "@/pages/superadmin/clients";
+import SuperAdminClientDetail from "@/pages/superadmin/client-detail";
 
 function LoadingSpinner() {
   return (
@@ -27,17 +30,36 @@ function LoadingSpinner() {
   );
 }
 
+// Guards the factory /admin panel. A superadmin may only enter while
+// impersonating a factory; otherwise we send them to their own panel.
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isLoading, isAuthenticated } = useAuth();
+  const { isLoading, isAuthenticated, isSuperAdmin, isImpersonating } = useAuth();
 
   if (isLoading) {
     return <LoadingSpinner />;
   }
-
   if (!isAuthenticated) {
     return <Redirect to="/login" />;
   }
+  if (isSuperAdmin && !isImpersonating) {
+    return <Redirect to="/superadmin" />;
+  }
+  return <>{children}</>;
+}
 
+// Guards the /superadmin panel — superadmin role only.
+function SuperAdminRoute({ children }: { children: React.ReactNode }) {
+  const { isLoading, isAuthenticated, isSuperAdmin } = useAuth();
+
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+  if (!isAuthenticated) {
+    return <Redirect to="/login" />;
+  }
+  if (!isSuperAdmin) {
+    return <Redirect to="/admin" />;
+  }
   return <>{children}</>;
 }
 
@@ -49,6 +71,22 @@ function Router() {
       {/* Embeddable / standalone chat page (no chrome, iframe-friendly) */}
       <Route path="/chat" component={EmbedChat} />
       <Route path="/login" component={LoginPage} />
+
+      {/* Super-admin (Aurex operator — cross-tenant) */}
+      <Route path="/superadmin">
+        <SuperAdminRoute>
+          <SuperAdminLayout>
+            <SuperAdminClients />
+          </SuperAdminLayout>
+        </SuperAdminRoute>
+      </Route>
+      <Route path="/superadmin/clients/:id">
+        <SuperAdminRoute>
+          <SuperAdminLayout>
+            <SuperAdminClientDetail />
+          </SuperAdminLayout>
+        </SuperAdminRoute>
+      </Route>
 
       {/* Admin (auth-gated) */}
       <Route path="/admin">

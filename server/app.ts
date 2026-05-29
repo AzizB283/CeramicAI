@@ -3,6 +3,7 @@ import cors from "cors";
 import { chatRouter } from "./routes/chat";
 import { authRouter } from "./routes/auth";
 import { adminRouter } from "./routes/admin";
+import { superadminRouter } from "./routes/superadmin";
 import { publicRouter } from "./routes/public";
 import { whatsappRouter } from "./routes/whatsapp";
 import { setupAuth } from "./auth";
@@ -40,6 +41,7 @@ export function buildApp() {
   app.use("/api/chat", chatRouter);
   app.use("/api/auth", authRouter);
   app.use("/api/admin", adminRouter);
+  app.use("/api/superadmin", superadminRouter);
 
   // /chat (the standalone embeddable page) and /widget.js must be loadable
   // inside an iframe on any third-party site. Apply the framing middleware

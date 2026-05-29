@@ -287,7 +287,6 @@ whatsappRouter.post("/:slug", async (req: Request, res: Response) => {
   const slug = String(req.params.slug ?? "");
   const client = await storage.getClientBySlug(slug);
   if (!client) return res.status(404).json({ error: "unknown client" });
-  if (!client.active) return res.status(403).json({ error: "client inactive" });
 
   // Signature verification. The express.json() middleware ran before us, so
   // we need the raw bytes — they were stashed by a verify-callback (see
@@ -307,6 +306,14 @@ whatsappRouter.post("/:slug", async (req: Request, res: Response) => {
   }
   if (!raw || !verifyMetaSignature(raw, appSecret, sigHeader)) {
     return res.status(401).json({ error: "invalid signature" });
+  }
+
+  // Suspension kill-switch: a deactivated factory's bot doesn't run. ACK with
+  // 200 (signature already verified, so this is a genuine Meta delivery) so
+  // Meta stops retrying, then skip processing — no bot reply is sent.
+  if (!client.active) {
+    console.log(`[WhatsApp] client ${slug} is inactive — acking without processing`);
+    return res.status(200).json({ received: true, inactive: true });
   }
 
   // ACK fast. We continue processing after the response is sent.

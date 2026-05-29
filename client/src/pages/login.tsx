@@ -26,15 +26,17 @@ export default function LoginPage() {
   const loginMutation = useMutation({
     mutationFn: async (credentials: { username: string; password: string }) => {
       const response = await apiRequest("POST", "/api/auth/login", credentials);
-      return response.json() as Promise<{ username: string }>;
+      return response.json() as Promise<{ username: string; role: "superadmin" | "factory" }>;
     },
     onSuccess: (data) => {
-      queryClient.setQueryData(["/api/auth/me"], data);
+      // Refetch /me so the cache holds the full identity (role, clientId, …),
+      // not just the slim login response.
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
       toast({
         title: "Welcome back!",
         description: `Logged in as ${data.username}`,
       });
-      setLocation("/admin");
+      setLocation(data.role === "superadmin" ? "/superadmin" : "/admin");
     },
     onError: () => {
       toast({

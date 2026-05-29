@@ -11,20 +11,29 @@ export const publicRouter = Router();
 
 // GET /api/public/widget-config[?client=<slug>]
 //
-// Returns the bot's branding so the floating widget can colour itself
-// before the iframe even loads. Single-tenant: always resolves to the
-// demo client. Multi-tenant (later): look up by req.query.client.
-publicRouter.get("/widget-config", async (_req, res) => {
+// Returns the bot's branding so the floating widget can colour itself before
+// the iframe even loads. Resolves the factory by ?client=<slug> (the embed
+// sets this), falling back to the demo client when absent/unknown. `active`
+// lets the embed optionally hide itself for a suspended factory.
+publicRouter.get("/widget-config", async (req, res) => {
   try {
-    const clientId = await ensureDemoClient();
-    const client = await storage.getClient(clientId);
+    const slug = req.query.client;
+    let client = undefined;
+    if (typeof slug === "string" && slug.trim()) {
+      client = await storage.getClientBySlug(slug.trim());
+    }
+    if (!client) {
+      const clientId = await ensureDemoClient();
+      client = await storage.getClient(clientId);
+    }
     res.json({
       botName: client?.widgetName || "CeramicBot",
       color: client?.widgetColor ? `#${client.widgetColor}` : "#e85d04",
       greeting: client?.widgetGreeting || null,
+      active: client?.active ?? true,
     });
   } catch (err) {
     console.error("widget-config error:", err);
-    res.json({ botName: "CeramicBot", color: "#e85d04", greeting: null });
+    res.json({ botName: "CeramicBot", color: "#e85d04", greeting: null, active: true });
   }
 });

@@ -12,7 +12,7 @@ describe("chatSessions", () => {
   afterEach(() => vi.useRealTimers());
 
   it("creates a session with a unique id and stores state", () => {
-    const s = createSession({ mode: "factory", stepId: "f_welcome", lead: {} });
+    const s = createSession({ mode: "factory", stepId: "f_welcome", lead: {}, clientId: "test-client" });
     expect(s.id).toMatch(/.+/);
     const got = getSession(s.id);
     expect(got?.mode).toBe("factory");
@@ -20,26 +20,26 @@ describe("chatSessions", () => {
   });
 
   it("updates session state", () => {
-    const s = createSession({ mode: "factory", stepId: "f_welcome", lead: {} });
-    setSession(s.id, { mode: "factory", stepId: "f_product", lead: { buyerType: "retailer" } });
+    const s = createSession({ mode: "factory", stepId: "f_welcome", lead: {}, clientId: "test-client" });
+    setSession(s.id, { mode: "factory", stepId: "f_product", lead: { buyerType: "retailer" }, clientId: "test-client" });
     expect(getSession(s.id)?.stepId).toBe("f_product");
     expect(getSession(s.id)?.lead.buyerType).toBe("retailer");
   });
 
   it("expires sessions after the TTL", () => {
-    const s = createSession({ mode: "factory", stepId: "f_welcome", lead: {} });
+    const s = createSession({ mode: "factory", stepId: "f_welcome", lead: {}, clientId: "test-client" });
     vi.advanceTimersByTime(31 * 60 * 1000); // 31 min > 30 min TTL
     expect(getSession(s.id)).toBeUndefined();
   });
 
   it("deletes a session", () => {
-    const s = createSession({ mode: "exporter", stepId: "x_welcome", lead: {} });
+    const s = createSession({ mode: "exporter", stepId: "x_welcome", lead: {}, clientId: "test-client" });
     deleteSession(s.id);
     expect(getSession(s.id)).toBeUndefined();
   });
 
   it("appendHistory accumulates turns and caps the buffer", () => {
-    const s = createSession({ mode: "factory", stepId: "f_welcome", lead: {} });
+    const s = createSession({ mode: "factory", stepId: "f_welcome", lead: {}, clientId: "test-client" });
     appendHistory(s.id, { role: "bot", text: "Welcome!" });
     appendHistory(s.id, { role: "user", text: "I'm a retailer" });
     const got = getSession(s.id);

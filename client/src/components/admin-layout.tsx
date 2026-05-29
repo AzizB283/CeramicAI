@@ -1,4 +1,6 @@
 import { Link, useLocation } from "wouter";
+import { useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -53,8 +55,38 @@ function Wordmark() {
   );
 }
 
+function ImpersonationBanner() {
+  const [, navigate] = useLocation();
+  const stop = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", "/api/superadmin/impersonate/stop");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      navigate("/superadmin");
+    },
+  });
+  return (
+    <div className="flex items-center justify-between gap-3 bg-coral px-4 py-2 text-sm text-white">
+      <span className="font-medium">
+        You are managing this factory as super-admin.
+      </span>
+      <Button
+        size="sm"
+        variant="secondary"
+        className="h-7"
+        onClick={() => stop.mutate()}
+        disabled={stop.isPending}
+        data-testid="button-exit-impersonation"
+      >
+        Exit to super-admin
+      </Button>
+    </div>
+  );
+}
+
 export function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { user, logout } = useAuth();
+  const { user, logout, isImpersonating } = useAuth();
   const [location] = useLocation();
 
   const sidebarStyle = {
@@ -143,6 +175,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
               </DropdownMenu>
             </div>
           </header>
+          {isImpersonating && <ImpersonationBanner />}
           <main className="flex-1 overflow-auto p-6">{children}</main>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { eq, and, lte, desc, asc, type SQL } from "drizzle-orm";
+import { eq, and, lte, desc, asc, sql, count, type SQL } from "drizzle-orm";
 import { db } from "./db";
 import { currentClientId, getTenantMode } from "./middleware/tenant";
 import {
@@ -299,6 +299,71 @@ export const storage = {
   // ── superadmin audit log ─────────────────────────────────────────────
   async logSuperadminAction(input: InsertSuperadminAction): Promise<void> {
     await db.insert(superadminActions).values(input);
+  },
+
+  // ── superadmin: cross-tenant factory management ──────────────────────
+  // These deliberately bypass scope() (no tenant context) and are only
+  // reachable behind requireSuperAdmin in the superadmin router.
+
+  // List every factory with usage counts for the superadmin dashboard.
+  async listAllClients(): Promise<
+    Array<CeramicClient & { leadCount: number; productCount: number; adminCount: number }>
+  > {
+    const clients = await db
+      .select()
+      .from(ceramicClients)
+      .orderBy(asc(ceramicClients.createdAt));
+    // Per-client counts. Small tenant counts → a few grouped queries are fine.
+    const leadCounts = await db
+      .select({ clientId: ceramicLeads.clientId, n: count() })
+      .from(ceramicLeads)
+      .groupBy(ceramicLeads.clientId);
+    const productCounts = await db
+      .select({ clientId: ceramicProducts.clientId, n: count() })
+      .from(ceramicProducts)
+      .groupBy(ceramicProducts.clientId);
+    const adminCounts = await db
+      .select({ clientId: adminUsers.clientId, n: count() })
+      .from(adminUsers)
+      .groupBy(adminUsers.clientId);
+    const byId = <T extends { clientId: string | null; n: number }>(rows: T[]) => {
+      const m = new Map<string, number>();
+      for (const r of rows) if (r.clientId) m.set(r.clientId, Number(r.n));
+      return m;
+    };
+    const leadMap = byId(leadCounts);
+    const productMap = byId(productCounts);
+    const adminMap = byId(adminCounts);
+    return clients.map((c) => ({
+      ...c,
+      leadCount: leadMap.get(c.id) ?? 0,
+      productCount: productMap.get(c.id) ?? 0,
+      adminCount: adminMap.get(c.id) ?? 0,
+    }));
+  },
+
+  // A factory plus its admin users (for the superadmin detail page).
+  async getClientWithAdmins(
+    id: string,
+  ): Promise<{ client: CeramicClient; admins: AdminUser[] } | undefined> {
+    const client = await this.getClient(id);
+    if (!client) return undefined;
+    const admins = await this.getAdminsForClient(id);
+    return { client, admins };
+  },
+
+  // Reset an admin's password. Refuses superadmin accounts (anti-lockout),
+  // matching clinic-ai's guard. Returns the updated row's identity.
+  async resetAdminPassword(
+    id: string,
+    passwordHash: string,
+  ): Promise<{ id: string; username: string } | undefined> {
+    const [row] = await db
+      .update(adminUsers)
+      .set({ password: passwordHash })
+      .where(and(eq(adminUsers.id, id), sql`${adminUsers.role} != 'superadmin'`))
+      .returning({ id: adminUsers.id, username: adminUsers.username });
+    return row;
   },
 
   // Replace the entire product set for the current client. We use a "wipe

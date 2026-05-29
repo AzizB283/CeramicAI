@@ -53,9 +53,12 @@ function buildLeadInsert(sessionId: string, l: LeadDraft): InsertCeramicLead {
  * catalog URL when no good match exists. Returns the snapshot unchanged
  * when not on a catalog step.
  */
-async function attachCatalogueUrl(snap: FlowSnapshot, mode: Mode): Promise<FlowSnapshot> {
+async function attachCatalogueUrl(
+  snap: FlowSnapshot,
+  mode: Mode,
+  clientId: string,
+): Promise<FlowSnapshot> {
   if (!snap.catalog) return snap;
-  const clientId = await ensureDemoClient();
   const [client, catalogues] = await Promise.all([
     storage.getClient(clientId),
     runWithClient(clientId, () => storage.getCatalogues()),
@@ -93,8 +96,22 @@ async function narrateSnapshot(
   return { ...snap, botMessages: bubbles };
 }
 
-async function resolveFactoryName(): Promise<string> {
-  const clientId = await ensureDemoClient();
+/**
+ * Resolve the tenant for an embed/web chat. The widget passes its factory's
+ * slug via ?client=<slug> (or { client } in the body); we look it up and fall
+ * back to the demo client when absent/unknown so the bare demo keeps working.
+ * Returns the full client row so callers can also check `active`.
+ */
+async function resolveClientForChat(slug: unknown) {
+  if (typeof slug === "string" && slug.trim()) {
+    const bySlug = await storage.getClientBySlug(slug.trim());
+    if (bySlug) return bySlug;
+  }
+  const demoId = await ensureDemoClient();
+  return storage.getClient(demoId);
+}
+
+async function resolveFactoryName(clientId: string): Promise<string> {
   const client = await storage.getClient(clientId);
   return client?.name ?? "Shree Tiles Pvt Ltd";
 }
@@ -143,21 +160,36 @@ function buildProductConfig(rows: CeramicProduct[]): ProductConfig | undefined {
   return config;
 }
 
-async function resolveProductConfig(): Promise<ProductConfig | undefined> {
-  const clientId = await ensureDemoClient();
+async function resolveProductConfig(clientId: string): Promise<ProductConfig | undefined> {
   const rows = await runWithClient(clientId, () => storage.getProducts());
   return buildProductConfig(rows);
 }
 
+// The single bot message shown when a factory is suspended (active=false).
+// Neutral wording — the buyer shouldn't see "suspended".
+const UNAVAILABLE_MESSAGE =
+  "This service is currently unavailable. Please contact us directly.";
+
 export const chatRouter = Router();
 
-// POST /api/chat/session  { mode } → { sessionId, ...snapshot }
+// POST /api/chat/session  { mode, client? } → { sessionId, ...snapshot }
 chatRouter.post("/session", async (req, res) => {
   const mode: Mode = req.body?.mode === "exporter" ? "exporter" : "factory";
-  const factoryName = await resolveFactoryName();
-  const products = await resolveProductConfig();
+  // The embed/widget passes its factory slug via body.client (or ?client=).
+  const slug = req.body?.client ?? req.query.client;
+  const client = await resolveClientForChat(slug);
+  if (!client) return res.status(404).json({ error: "unknown client" });
 
-  const initial = await attachCatalogueUrl(startFlow(mode, products), mode);
+  // Suspension kill-switch: a deactivated factory's bot does not run.
+  if (!client.active) {
+    return res.json({ unavailable: true, botMessages: [UNAVAILABLE_MESSAGE] });
+  }
+
+  const clientId = client.id;
+  const factoryName = client.name;
+  const products = await resolveProductConfig(clientId);
+
+  const initial = await attachCatalogueUrl(startFlow(mode, products), mode, clientId);
   // Fresh session has no history — the welcome turn is bot-only.
   const narrated = await narrateSnapshot(initial, mode, [], factoryName);
 
@@ -165,6 +197,7 @@ chatRouter.post("/session", async (req, res) => {
     mode,
     stepId: narrated.stepId,
     lead: narrated.lead,
+    clientId,
   });
   // Seed the session's history with the welcome bot turn(s).
   for (const text of narrated.botMessages) {
@@ -189,7 +222,16 @@ chatRouter.post("/message", async (req, res) => {
   const userTurnText = (text ?? choiceLabel ?? "").toString().trim();
   if (userTurnText) appendHistory(sessionId, { role: "user", text: userTurnText });
 
-  const products = await resolveProductConfig();
+  const clientId = session.clientId;
+  // Suspension can happen mid-conversation — stop the flow if the factory was
+  // deactivated since the session started.
+  const client = await storage.getClient(clientId);
+  if (!client || !client.active) {
+    deleteSession(sessionId);
+    return res.json({ unavailable: true, botMessages: [UNAVAILABLE_MESSAGE] });
+  }
+
+  const products = await resolveProductConfig(clientId);
   const advanced = advanceFlow({
     mode: session.mode,
     stepId: session.stepId,
@@ -203,8 +245,8 @@ chatRouter.post("/message", async (req, res) => {
   // history. The session itself is being reset to the entry step by the
   // engine, so the FSM/lead state is already clean.
   const isReset = advanced.startOver;
-  const snap = await attachCatalogueUrl(advanced, session.mode);
-  const factoryName = await resolveFactoryName();
+  const snap = await attachCatalogueUrl(advanced, session.mode, clientId);
+  const factoryName = client.name;
 
   const historyForLLM: ChatHistoryTurn[] = isReset
     ? []
@@ -215,6 +257,7 @@ chatRouter.post("/message", async (req, res) => {
     mode: session.mode,
     stepId: narrated.stepId,
     lead: narrated.lead,
+    clientId,
   });
 
   // Record the bot's reply in history. If the session is about to be deleted
@@ -226,7 +269,6 @@ chatRouter.post("/message", async (req, res) => {
 
   // Persist the captured lead once, on a terminal step that is NOT a "Start over" reset.
   if (narrated.terminal && !narrated.startOver) {
-    const clientId = await ensureDemoClient();
     await runWithClient(clientId, () =>
       storage.createLead(buildLeadInsert(sessionId, narrated.lead)),
     );
@@ -249,7 +291,7 @@ chatRouter.post("/ask", async (req, res) => {
   const session = sessionId ? getSession(sessionId) : undefined;
   if (!session) return res.status(404).json({ error: "session not found or expired" });
 
-  const factoryName = await resolveFactoryName();
+  const factoryName = await resolveFactoryName(session.clientId);
   const answer = await answerSideQuestion(question.trim(), session.mode, factoryName);
 
   // Record both turns so future LLM calls see the side-question context.

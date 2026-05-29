@@ -146,13 +146,28 @@ export function useChatFlow(initialMode: Mode) {
       setLead({});
       setTyping(true);
       try {
+        // The embed/standalone page carries the factory slug as ?client=<slug>;
+        // the bare demo at "/" has none and the server falls back to demo.
+        const slug =
+          typeof window !== "undefined"
+            ? new URLSearchParams(window.location.search).get("client")
+            : null;
         const res = await fetch("/api/chat/session", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ mode: m }),
+          body: JSON.stringify({ mode: m, client: slug ?? undefined }),
         });
         if (!res.ok) throw new Error(`session failed: ${res.status}`);
-        const data = (await res.json()) as SessionResponse;
+        const data = (await res.json()) as SessionResponse & {
+          unavailable?: boolean;
+          botMessages?: string[];
+        };
+        // Suspended factory: the server returns no session, just a message.
+        if (data.unavailable) {
+          setTyping(false);
+          pushBot(data.botMessages?.[0] ?? "This service is currently unavailable.");
+          return;
+        }
         sessionId.current = data.sessionId;
         playSnapshot(data);
       } catch {
