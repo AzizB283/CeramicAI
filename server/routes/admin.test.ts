@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import bcrypt from "bcryptjs";
 import request from "supertest";
 import { buildApp } from "../app";
 import { pool } from "../db";
@@ -11,6 +12,11 @@ const app = buildApp();
 // A persistent agent keeps the session cookie across requests.
 const agent = request.agent(app);
 
+// A known superadmin login for the impersonation-gate test (the seeded one has
+// a random password unless SUPERADMIN_PASSWORD is set).
+const SUPER_USERNAME = "super-admin-test";
+const SUPER_PASSWORD = "super-test-pw-123";
+
 const SESSION_ID = "admin-test-lead";
 let leadId: number;
 
@@ -18,6 +24,17 @@ beforeAll(async () => {
   // Auth is now DB-backed: ensure the demo factory admin (admin/admin123)
   // exists so the login assertions below pass on a fresh test DB.
   await seedAdminUsers();
+  // A known superadmin (cross-tenant, clientId=null) for the gate test.
+  if (!(await storage.getAdminUserByUsername(SUPER_USERNAME))) {
+    await storage.createAdminUser({
+      clientId: null,
+      username: SUPER_USERNAME,
+      password: await bcrypt.hash(SUPER_PASSWORD, 10),
+      name: "Super Test",
+      role: "superadmin",
+      active: true,
+    });
+  }
   // Seed one lead so the list/stats are non-empty.
   const clientId = await ensureDemoClient();
   const lead = await runWithClient(clientId, () =>
@@ -143,6 +160,30 @@ describe("admin settings (authenticated)", () => {
     expect(res.status).toBe(200);
     expect(res.body.widgetGreeting).toBe(greeting);
     expect(res.body).not.toHaveProperty("waToken");
+  });
+});
+
+describe("superadmin not impersonating is blocked from /api/admin", () => {
+  // A superadmin is logged in but hasn't started a factory session, so the
+  // admin routes have no client to scope to → 403 (not a silent demo fallback).
+  const superAgent = request.agent(app);
+
+  it("logs in as superadmin", async () => {
+    const res = await superAgent
+      .post("/api/auth/login")
+      .send({ username: SUPER_USERNAME, password: SUPER_PASSWORD });
+    expect(res.status).toBe(200);
+    expect(res.body.role).toBe("superadmin");
+  });
+
+  it("GET /api/admin/leads returns 403 when not impersonating", async () => {
+    const res = await superAgent.get("/api/admin/leads");
+    expect(res.status).toBe(403);
+  });
+
+  it("GET /api/admin/settings returns 403 when not impersonating", async () => {
+    const res = await superAgent.get("/api/admin/settings");
+    expect(res.status).toBe(403);
   });
 });
 

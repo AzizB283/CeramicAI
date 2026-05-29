@@ -1,3 +1,4 @@
+import type { Request, Response } from "express";
 import { Router } from "express";
 import { z } from "zod";
 import type {
@@ -7,8 +8,7 @@ import type {
   InsertCeramicProduct,
 } from "@shared/schema";
 import { insertCeramicCatalogueSchema } from "@shared/schema";
-import { requireAuth } from "../auth";
-import { ensureDemoClient } from "../seed";
+import { requireAuth, effectiveClientId, AuthError } from "../auth";
 import { runWithClient } from "../middleware/tenant";
 import { storage } from "../storage";
 import { encrypt, decrypt, isEncrypted } from "../utils/encryption";
@@ -17,6 +17,26 @@ export const adminRouter = Router();
 
 // Everything under /api/admin requires a logged-in admin.
 adminRouter.use(requireAuth);
+
+/**
+ * Resolve the client id this admin request operates on:
+ *  - factory admin → their own session clientId,
+ *  - superadmin → the factory they're impersonating (or 403 if none).
+ * On failure, writes the error response and returns null — callers must
+ * `if (!clientId) return;`. This replaces the old ensureDemoClient() that
+ * hard-pinned every route to the single demo factory.
+ */
+function resolveClient(req: Request, res: Response): string | null {
+  try {
+    return effectiveClientId(req);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      res.status(err.status).json({ error: err.message });
+      return null;
+    }
+    throw err;
+  }
+}
 
 const LEAD_STATUSES = ["new", "contacted", "converted", "lost"] as const;
 type LeadStatus = (typeof LEAD_STATUSES)[number];
@@ -45,10 +65,30 @@ const EDITABLE_CLIENT_FIELDS = [
   "active",
 ] as const;
 
-// GET /api/admin/leads → all leads for the demo client
-adminRouter.get("/leads", async (_req, res) => {
-  const clientId = await ensureDemoClient();
+/**
+ * Audit a PII-bearing read when a superadmin is impersonating a factory.
+ * Factory admins reading their own leads are NOT logged (it's their data).
+ * Fire-and-forget — a logging failure must not break the read.
+ */
+function auditLeadsView(req: Request, clientId: string, detail: string): void {
+  const user = req.session?.user;
+  if (user?.role !== "superadmin") return;
+  void storage
+    .logSuperadminAction({
+      superadminId: user.id,
+      clientId,
+      action: "view_leads",
+      detail,
+    })
+    .catch((err) => console.error("[audit] view_leads log failed:", err));
+}
+
+// GET /api/admin/leads → all leads for the resolved client
+adminRouter.get("/leads", async (req, res) => {
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const leads = await runWithClient(clientId, () => storage.getLeads());
+  auditLeadsView(req, clientId, "list");
   res.json(leads);
 });
 
@@ -56,9 +96,11 @@ adminRouter.get("/leads", async (_req, res) => {
 adminRouter.get("/leads/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: "invalid lead id" });
-  const clientId = await ensureDemoClient();
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const lead = await runWithClient(clientId, () => storage.getLead(id));
   if (!lead) return res.status(404).json({ error: "lead not found" });
+  auditLeadsView(req, clientId, `lead:${id}`);
   res.json(lead);
 });
 
@@ -70,7 +112,8 @@ adminRouter.patch("/leads/:id", async (req, res) => {
   if (!LEAD_STATUSES.includes(status)) {
     return res.status(400).json({ error: `status must be one of ${LEAD_STATUSES.join(", ")}` });
   }
-  const clientId = await ensureDemoClient();
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   try {
     const updated = await runWithClient(clientId, () =>
       storage.updateLead(id, { status: status as LeadStatus }),
@@ -82,8 +125,9 @@ adminRouter.patch("/leads/:id", async (req, res) => {
 });
 
 // GET /api/admin/stats → aggregate counts computed from the lead list
-adminRouter.get("/stats", async (_req, res) => {
-  const clientId = await ensureDemoClient();
+adminRouter.get("/stats", async (req, res) => {
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const leads = await runWithClient(clientId, () => storage.getLeads());
 
   const byStatus = { new: 0, contacted: 0, converted: 0, lost: 0 };
@@ -122,15 +166,16 @@ adminRouter.get("/stats", async (_req, res) => {
   });
 });
 
-// GET /api/admin/settings → the demo client row (minus waToken)
-adminRouter.get("/settings", async (_req, res) => {
-  const clientId = await ensureDemoClient();
+// GET /api/admin/settings → the resolved client row (minus waToken)
+adminRouter.get("/settings", async (req, res) => {
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const client = await storage.getClient(clientId);
   if (!client) return res.status(404).json({ error: "client not found" });
   res.json(publicClient(client));
 });
 
-// PATCH /api/admin/settings { ...fields } → update the demo client (minus waToken)
+// PATCH /api/admin/settings { ...fields } → update the resolved client (minus waToken)
 adminRouter.patch("/settings", async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const patch: Record<string, unknown> = {};
@@ -140,7 +185,8 @@ adminRouter.patch("/settings", async (req, res) => {
   if (Object.keys(patch).length === 0) {
     return res.status(400).json({ error: "no editable fields provided" });
   }
-  const clientId = await ensureDemoClient();
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const updated = await storage.updateClient(clientId, patch);
   res.json(publicClient(updated));
 });
@@ -180,8 +226,9 @@ const catalogueInputSchema = insertCeramicCatalogueSchema.extend({
 });
 
 // GET /api/admin/catalogues → list (newest active first, then by display order)
-adminRouter.get("/catalogues", async (_req, res) => {
-  const clientId = await ensureDemoClient();
+adminRouter.get("/catalogues", async (req, res) => {
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const list = await runWithClient(clientId, () => storage.getCatalogues());
   res.json(list);
 });
@@ -192,7 +239,8 @@ adminRouter.post("/catalogues", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid catalogue", issues: parsed.error.flatten() });
   }
-  const clientId = await ensureDemoClient();
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const created = await runWithClient(clientId, () =>
     storage.createCatalogue(parsed.data as InsertCeramicCatalogue),
   );
@@ -207,7 +255,8 @@ adminRouter.patch("/catalogues/:id", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid patch", issues: parsed.error.flatten() });
   }
-  const clientId = await ensureDemoClient();
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   try {
     const updated = await runWithClient(clientId, () =>
       storage.updateCatalogue(id, parsed.data as Partial<InsertCeramicCatalogue>),
@@ -222,7 +271,8 @@ adminRouter.patch("/catalogues/:id", async (req, res) => {
 adminRouter.delete("/catalogues/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: "invalid catalogue id" });
-  const clientId = await ensureDemoClient();
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   await runWithClient(clientId, () => storage.deleteCatalogue(id));
   res.status(204).end();
 });
@@ -256,7 +306,8 @@ function publicWhatsAppConfig(client: CeramicClient, originHint: string): WhatsA
 
 // GET /api/admin/whatsapp → current config (secrets masked)
 adminRouter.get("/whatsapp", async (req, res) => {
-  const clientId = await ensureDemoClient();
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const client = await storage.getClient(clientId);
   if (!client) return res.status(404).json({ error: "client not found" });
   const origin = `${req.protocol}://${req.get("host") ?? "localhost"}`;
@@ -300,7 +351,8 @@ adminRouter.patch("/whatsapp", async (req, res) => {
     return res.status(400).json({ error: "no editable WhatsApp fields provided" });
   }
 
-  const clientId = await ensureDemoClient();
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const updated = await storage.updateClient(clientId, patch);
   const origin = `${req.protocol}://${req.get("host") ?? "localhost"}`;
   res.json(publicWhatsAppConfig(updated, origin));
@@ -309,8 +361,9 @@ adminRouter.patch("/whatsapp", async (req, res) => {
 // POST /api/admin/whatsapp/test → quick sanity check: are credentials present,
 // and can we decrypt them? Doesn't actually call Meta — that's the dashboard's
 // "Send a test message" affordance (TODO once webhooks are confirmed live).
-adminRouter.post("/whatsapp/test", async (_req, res) => {
-  const clientId = await ensureDemoClient();
+adminRouter.post("/whatsapp/test", async (req, res) => {
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const client = await storage.getClient(clientId);
   if (!client) return res.status(404).json({ error: "client not found" });
   const problems: string[] = [];
@@ -367,8 +420,9 @@ const productsPutSchema = z.object({
 });
 
 // GET /api/admin/products → list current factory's product rows
-adminRouter.get("/products", async (_req, res) => {
-  const clientId = await ensureDemoClient();
+adminRouter.get("/products", async (req, res) => {
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const rows = await runWithClient(clientId, () => storage.getProducts());
   res.json(rows);
 });
@@ -392,7 +446,8 @@ adminRouter.put("/products", async (req, res) => {
     seen.add(it.category);
   }
 
-  const clientId = await ensureDemoClient();
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
   const toInsert: InsertCeramicProduct[] = parsed.data.items.map((it) => ({
     category: it.category,
     customLabel: it.customLabel ?? null,
