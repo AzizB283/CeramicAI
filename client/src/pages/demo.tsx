@@ -9,13 +9,25 @@ type WidgetConfig = {
   botName: string;
   color: string;
   greeting: string | null;
+  mode: Mode;
 };
 
 const DEFAULT_CONFIG: WidgetConfig = {
   botName: "CeramicBot",
   color: "#e85d04",
   greeting: null,
+  mode: "factory",
 };
+
+/**
+ * "demo"  → public showcase at /demo: shows the Factory/Export mode toggle and
+ *           the outer page chrome, so prospects can preview both flows.
+ * "embed" → the /chat iframe widget: just the chat window. No mode toggle (a
+ *           real factory runs one mode, taken from widget-config); the
+ *           Aurex Auto credit sits inside the widget, below the composer; and
+ *           the shell fills the iframe edge-to-edge.
+ */
+export type ChatVariant = "demo" | "embed";
 
 function getContrastColor(hex: string): string {
   const h = hex.replace(/^#/, "");
@@ -27,29 +39,48 @@ function getContrastColor(hex: string): string {
   return luminance > 0.6 ? "#000000" : "#ffffff";
 }
 
-export default function DemoChat() {
+export default function DemoChat({ variant = "demo" }: { variant?: ChatVariant }) {
+  const isEmbed = variant === "embed";
   const chat = useChatFlow("factory");
   const threadRef = useRef<HTMLDivElement>(null);
   const [config, setConfig] = useState<WidgetConfig>(DEFAULT_CONFIG);
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [input, setInput] = useState("");
 
+  // Resolve the client slug the embed carries as ?client=<slug> so we fetch the
+  // right factory's branding + mode (and below, start in that mode).
+  const clientSlug =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("client")
+      : null;
+
   useEffect(() => {
-    fetch("/api/public/widget-config")
+    const qs = clientSlug ? `?client=${encodeURIComponent(clientSlug)}` : "";
+    fetch(`/api/public/widget-config${qs}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((c) => {
         if (c) setConfig({ ...DEFAULT_CONFIG, ...c });
       })
-      .catch(() => {});
-  }, []);
+      .catch(() => {})
+      // Mark loaded either way so the embed can start (falling back to the
+      // default mode if the fetch failed) rather than hanging on a blank widget.
+      .finally(() => setConfigLoaded(true));
+  }, [clientSlug]);
 
-  // Start the conversation on first mount.
+  // Start the conversation on first mount. The public demo always opens in
+  // factory mode immediately; the embed waits for widget-config so it can open
+  // in the factory's configured mode (no toggle to switch later).
   const started = useRef(false);
   useEffect(() => {
-    if (!started.current) {
+    if (started.current) return;
+    if (!isEmbed) {
       started.current = true;
       chat.start("factory");
+    } else if (configLoaded) {
+      started.current = true;
+      chat.start(config.mode);
     }
-  }, [chat]);
+  }, [chat, isEmbed, configLoaded, config.mode]);
 
   useEffect(() => {
     threadRef.current?.scrollTo({
@@ -75,29 +106,46 @@ export default function DemoChat() {
   };
 
   return (
-    <div className="flex min-h-full flex-col items-center bg-cream px-4 py-8">
-      {/* Mode toggle — small, subtle */}
-      <div className="mb-4 flex items-center gap-1 rounded-full border border-ink/10 bg-white p-1 text-xs">
-        <ModeButton
-          active={chat.mode === "factory"}
-          onClick={() => switchMode("factory")}
-          icon={<Factory className="h-3.5 w-3.5" />}
-          label="Factory"
-          color={themeColor}
-          textOnTheme={textOnTheme}
-        />
-        <ModeButton
-          active={chat.mode === "exporter"}
-          onClick={() => switchMode("exporter")}
-          icon={<Globe2 className="h-3.5 w-3.5" />}
-          label="Export"
-          color={themeColor}
-          textOnTheme={textOnTheme}
-        />
-      </div>
+    <div
+      className={cn(
+        "flex flex-col items-center",
+        // Embed: fill the iframe edge-to-edge, no page chrome. Demo: centered
+        // card on the cream page with breathing room and the mode toggle.
+        isEmbed ? "min-h-full bg-white" : "min-h-full bg-cream px-4 py-8",
+      )}
+    >
+      {/* Mode toggle — demo only. The embedded widget runs the factory's own
+          single mode (from widget-config), so there's nothing to switch. */}
+      {!isEmbed && (
+        <div className="mb-4 flex items-center gap-1 rounded-full border border-ink/10 bg-white p-1 text-xs">
+          <ModeButton
+            active={chat.mode === "factory"}
+            onClick={() => switchMode("factory")}
+            icon={<Factory className="h-3.5 w-3.5" />}
+            label="Factory"
+            color={themeColor}
+            textOnTheme={textOnTheme}
+          />
+          <ModeButton
+            active={chat.mode === "exporter"}
+            onClick={() => switchMode("exporter")}
+            icon={<Globe2 className="h-3.5 w-3.5" />}
+            label="Export"
+            color={themeColor}
+            textOnTheme={textOnTheme}
+          />
+        </div>
+      )}
 
-      {/* Chat window — clinic-ai dimensions, tighter radius */}
-      <div className="flex h-[32rem] w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-xl">
+      {/* Chat window. Demo: fixed-height card. Embed: fills the iframe height. */}
+      <div
+        className={cn(
+          "flex w-full flex-col overflow-hidden bg-white",
+          isEmbed
+            ? "h-full max-w-none rounded-none border-0 shadow-none"
+            : "h-[32rem] max-w-sm rounded-2xl border border-ink/10 shadow-xl",
+        )}
+      >
         {/* Header — theme color */}
         <div
           className="flex items-center gap-3 px-4 py-3"
@@ -226,23 +274,37 @@ export default function DemoChat() {
               <SendHorizonal className="h-4 w-4" />
             </button>
           </div>
+
+          {/* Embed: the Aurex Auto credit lives inside the widget, just below
+              the input, so the iframe contains the whole experience. */}
+          {isEmbed && (
+            <PoweredBy color={themeColor} className="mt-2 text-center" />
+          )}
         </div>
       </div>
 
-      {/* Footer */}
-      <footer className="mt-4 text-center text-xs text-ink/50">
-        Powered by{" "}
-        <a
-          href="https://aurexauto.com"
-          target="_blank"
-          rel="noreferrer"
-          style={{ color: themeColor }}
-          className="font-medium hover:underline"
-        >
-          Aurex Auto
-        </a>
-      </footer>
+      {/* Demo: the credit sits below the card on the cream page. */}
+      {!isEmbed && (
+        <PoweredBy color={themeColor} className="mt-4 text-center" />
+      )}
     </div>
+  );
+}
+
+function PoweredBy({ color, className }: { color: string; className?: string }) {
+  return (
+    <footer className={cn("text-xs text-ink/50", className)}>
+      Powered by{" "}
+      <a
+        href="https://aurexauto.com"
+        target="_blank"
+        rel="noreferrer"
+        style={{ color }}
+        className="font-medium hover:underline"
+      >
+        Aurex Auto
+      </a>
+    </footer>
   );
 }
 

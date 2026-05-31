@@ -78,7 +78,9 @@ function Router() {
           /demo is reachable (for in-panel/internal demos) but not linked
           from the marketing pages. /chat stays for the embeddable widget +
           iframe on factory websites (driven by ?client=<slug>). */}
-      <Route path="/demo" component={DemoChat} />
+      <Route path="/demo">
+        <DemoChat variant="demo" />
+      </Route>
       <Route path="/chat" component={EmbedChat} />
       <Route path="/login" component={LoginPage} />
 

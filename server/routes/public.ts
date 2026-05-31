@@ -31,9 +31,18 @@ publicRouter.get("/widget-config", async (req, res) => {
       color: client?.widgetColor ? `#${client.widgetColor}` : "#e85d04",
       greeting: client?.widgetGreeting || null,
       active: client?.active ?? true,
+      // The embedded widget runs the factory's own single mode (no toggle), so
+      // it needs to know which one. Defaults to "factory" for safety.
+      mode: client?.mode === "exporter" ? "exporter" : "factory",
     });
   } catch (err) {
     console.error("widget-config error:", err);
-    res.json({ botName: "CeramicBot", color: "#e85d04", greeting: null, active: true });
+    res.json({
+      botName: "CeramicBot",
+      color: "#e85d04",
+      greeting: null,
+      active: true,
+      mode: "factory",
+    });
   }
 });

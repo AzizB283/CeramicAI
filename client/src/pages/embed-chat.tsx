@@ -2,14 +2,12 @@ import DemoChat from "@/pages/demo";
 
 /**
  * Standalone /chat page intended for iframe embedding (and as a shareable
- * direct link). It renders the same chat experience as the public demo but
- * is detected/styled to fit a small floating widget shell.
- *
- * Currently this is a thin wrapper around <DemoChat />. If we later want
- * an iframe-specific compact layout (no header, edge-to-edge bubbles),
- * factor the chat window out of DemoChat into a shared component and
- * import it here directly.
+ * direct link). It renders the same chat engine as the public demo but in the
+ * "embed" variant: no Factory/Export mode toggle (the factory runs its own
+ * single mode, resolved from widget-config), the chat window fills the iframe
+ * edge-to-edge, and the "Powered by Aurex Auto" credit sits inside the widget
+ * just below the composer.
  */
 export default function EmbedChat() {
-  return <DemoChat />;
+  return <DemoChat variant="embed" />;
 }
