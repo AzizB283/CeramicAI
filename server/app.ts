@@ -24,6 +24,14 @@ export function buildApp() {
     }),
   );
 
+  // Health check. Cheap, unauthenticated, no DB hit — used by Render's
+  // platform probe AND by our own keep-alive self-ping (see services/keepAlive)
+  // to stop the free-tier instance from spinning down on idle. Mounted before
+  // auth/session so a probe never touches session state.
+  app.get("/health", (_req: Request, res: Response) => {
+    res.status(200).json({ status: "ok", uptime: process.uptime() });
+  });
+
   // Session middleware must run before any router that reads req.session.
   setupAuth(app);
 

@@ -12,6 +12,7 @@
 
 import type { LeadDraft, Mode, QuickReply, StepId } from "./types";
 import { DEMO_CLIENT_NAME, ENTRY, STEPS } from "./flows";
+import { cleanFieldValue } from "./extract";
 
 /**
  * Per-factory product configuration. The server loads this from
@@ -228,9 +229,24 @@ export function startFlow(mode: Mode, products?: ProductConfig): FlowSnapshot {
  * returns the current step unchanged.
  */
 export function advanceFlow(input: AdvanceInput): FlowSnapshot {
-  const { mode, stepId, choiceLabel, text, products } = input;
+  const { mode, stepId, text, products } = input;
   const step = STEPS[stepId];
   const lead: LeadDraft = { ...input.lead };
+
+  // On a CHOICE step, a buyer who types (instead of tapping a chip) may have
+  // typed a chip's exact label — e.g. "Retailer" on WhatsApp. Treat that as if
+  // they tapped it. If the typed text matches no chip, fall through: we must
+  // NOT write arbitrary text ("Hi") into the choice field. The text branch
+  // below then leaves the field untouched and re-prompts.
+  let choiceLabel = input.choiceLabel;
+  if (choiceLabel === undefined && text !== undefined && step.input === "choice") {
+    const typed = text.trim();
+    const resolved = resolveOptions(stepId, step.options, lead, products);
+    const match =
+      resolved.find((o) => o.label.toLowerCase() === typed.toLowerCase()) ??
+      (step.options ?? []).find((o) => o.label.toLowerCase() === typed.toLowerCase());
+    if (match) choiceLabel = match.label;
+  }
 
   if (choiceLabel !== undefined) {
     // Look up against the *resolved* options (which may be the per-factory
@@ -258,7 +274,16 @@ export function advanceFlow(input: AdvanceInput): FlowSnapshot {
   if (text !== undefined) {
     const trimmed = text.trim();
     if (!trimmed) return snapshot(mode, stepId, lead, products);
-    if (step.field) lead[step.field] = trimmed as never;
+    // On a choice step, unmatched free text is an off-flow message (a greeting
+    // like "Hi", or a side-question). Don't store it as the field value and
+    // don't advance — stay on the step so the buyer is re-prompted with chips.
+    if (step.input === "choice") return snapshot(mode, stepId, lead, products);
+    if (step.field) {
+      // Strip conversational lead-ins ("my name is Rajesh" → "Rajesh") so the
+      // lead field holds the value, not the sentence. Pure + always-on; the
+      // server may further refine name-like fields via LLM before this runs.
+      lead[step.field] = cleanFieldValue(step.field, trimmed) as never;
+    }
     if (step.next) return snapshot(mode, step.next, lead, products);
     return snapshot(mode, stepId, lead, products);
   }

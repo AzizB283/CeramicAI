@@ -111,6 +111,54 @@ describe("flowEngine — no-op / invalid input", () => {
   });
 });
 
+describe("flowEngine — free-text cleanup on name capture", () => {
+  it("strips a lead-in phrase from the name on the catalog step", () => {
+    let st = startFlow("factory");
+    const pick = (label: string) => {
+      st = advanceFlow({ mode: "factory", stepId: st.stepId, lead: st.lead, choiceLabel: label });
+    };
+    pick("Retailer / Tile Shop Owner");
+    pick("GVT / Vitrified Floor Tiles");
+    pick("600×600");
+    pick("Matte");
+    pick("500–2,000 boxes");
+    expect(st.stepId).toBe("f_catalog");
+    const named = advanceFlow({
+      mode: "factory",
+      stepId: st.stepId,
+      lead: st.lead,
+      text: "My name is Rajesh",
+    });
+    expect(named.lead.buyerName).toBe("Rajesh");
+    expect(named.stepId).toBe("f_city");
+  });
+});
+
+describe("flowEngine — free text on a choice step", () => {
+  it("does not store an unmatched greeting as the choice field", () => {
+    const s = advanceFlow({
+      mode: "factory",
+      stepId: "f_welcome",
+      lead: {},
+      text: "Hi",
+    });
+    // Stays on the welcome step; buyerType is NOT polluted with "Hi".
+    expect(s.stepId).toBe("f_welcome");
+    expect(s.lead.buyerType).toBeUndefined();
+  });
+
+  it("treats a typed chip label as if the chip were tapped", () => {
+    const s = advanceFlow({
+      mode: "factory",
+      stepId: "f_welcome",
+      lead: {},
+      text: "Retailer / Tile Shop Owner",
+    });
+    expect(s.stepId).toBe("f_product");
+    expect(s.lead.buyerType).toBe("retailer");
+  });
+});
+
 describe("flowEngine — Start over", () => {
   it("sets the startOver flag and resets to the welcome step with empty lead", () => {
     const s = advanceFlow({

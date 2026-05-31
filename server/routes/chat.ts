@@ -1,12 +1,12 @@
 import { Router } from "express";
 import type { Mode, LeadDraft } from "@shared/types";
-import type { CeramicProduct, InsertCeramicLead } from "@shared/schema";
+import type { InsertCeramicLead } from "@shared/schema";
 import {
   startFlow,
   advanceFlow,
   type FlowSnapshot,
-  type ProductConfig,
 } from "@shared/flowEngine";
+import { resolveProductConfig } from "../services/productConfig";
 import {
   createSession,
   getSession,
@@ -18,6 +18,7 @@ import { ensureDemoClient } from "../seed";
 import { runWithClient } from "../middleware/tenant";
 import { storage } from "../storage";
 import { answerSideQuestion } from "../services/openaiAsk";
+import { cleanIncomingText } from "../services/entityExtraction";
 import { pickCatalogue } from "../services/catalogueMatcher";
 import {
   generateBotReply,
@@ -116,55 +117,6 @@ async function resolveFactoryName(clientId: string): Promise<string> {
   return client?.name ?? "Shree Tiles Pvt Ltd";
 }
 
-/**
- * Build the ProductConfig the engine consumes from the rows the admin
- * configured. Returns undefined when the factory has zero rows — the engine
- * then falls back to the hardcoded defaults in flows.ts.
- *
- * Standard categories use their slug as the key. Custom categories
- * (category="other") get a synthetic per-row key ("custom:<id>") so the
- * factory can configure multiple distinct custom categories without them
- * collapsing into one.
- */
-const STANDARD_CATEGORY_LABELS: Record<string, string> = {
-  ceramic_wall: "Ceramic Wall Tiles",
-  gvt: "GVT / Vitrified Floor",
-  pgvt: "PGVT",
-  double_charge: "Double Charge",
-  slab: "Slab (Large Format)",
-  sanitaryware: "Sanitaryware",
-};
-
-function buildProductConfig(rows: CeramicProduct[]): ProductConfig | undefined {
-  const active = rows.filter((r) => r.isActive);
-  if (active.length === 0) return undefined;
-  const config: ProductConfig = {
-    categories: [],
-    sizesByCategory: {},
-    finishesByCategory: {},
-    sanitaryItems: [],
-  };
-  for (const row of active) {
-    const isCustom = row.category === "other";
-    const value = isCustom ? `custom:${row.id}` : row.category;
-    const label = isCustom
-      ? row.customLabel?.trim() || "Other"
-      : STANDARD_CATEGORY_LABELS[row.category] ?? row.category;
-    config.categories.push({ value, label });
-    config.sizesByCategory[value] = row.sizes ?? [];
-    config.finishesByCategory[value] = row.finishes ?? [];
-    if (row.category === "sanitaryware") {
-      config.sanitaryItems = row.subItems ?? [];
-    }
-  }
-  return config;
-}
-
-async function resolveProductConfig(clientId: string): Promise<ProductConfig | undefined> {
-  const rows = await runWithClient(clientId, () => storage.getProducts());
-  return buildProductConfig(rows);
-}
-
 // The single bot message shown when a factory is suspended (active=false).
 // Neutral wording — the buyer shouldn't see "suspended".
 const UNAVAILABLE_MESSAGE =
@@ -232,12 +184,15 @@ chatRouter.post("/message", async (req, res) => {
   }
 
   const products = await resolveProductConfig(clientId);
+  // Extract the clean value from free-text answers ("my name is Rajesh" →
+  // "Rajesh") before advancing — history above keeps the buyer's literal words.
+  const cleanedText = await cleanIncomingText(session.stepId, text);
   const advanced = advanceFlow({
     mode: session.mode,
     stepId: session.stepId,
     lead: session.lead,
     choiceLabel,
-    text,
+    text: cleanedText,
     products,
   });
 

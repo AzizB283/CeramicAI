@@ -5,6 +5,7 @@ import "./env";
 import { buildApp } from "./app";
 import { ensureDemoClient, seedAdminUsers } from "./seed";
 import { runMigrations } from "./db";
+import { startKeepAlive } from "./services/keepAlive";
 
 const PORT = Number(process.env.PORT ?? 5000);
 
@@ -25,6 +26,12 @@ async function main() {
     console.log(
       `[server] CeramicBot ${mode} server listening on http://localhost:${PORT}`,
     );
+    // Keep the Render free-tier instance warm by self-pinging /health every
+    // 10 min. Only in production — locally there's no idle-spindown to fight,
+    // and a dev self-ping just spams the console.
+    if (process.env.NODE_ENV === "production") {
+      startKeepAlive(PORT);
+    }
   });
 }
 

@@ -17,6 +17,8 @@ import {
   type ChatHistoryTurn,
 } from "../../services/openaiChat";
 import { pickCatalogue } from "../../services/catalogueMatcher";
+import { resolveProductConfig } from "../../services/productConfig";
+import { cleanIncomingText } from "../../services/entityExtraction";
 
 /**
  * WhatsApp Business Cloud API webhook (Meta Graph API v24).
@@ -177,13 +179,23 @@ async function processInboundMessage(
     session.lead = { ...session.lead, buyerPhone: from };
   }
 
+  // Load the factory's configured products so WhatsApp offers the same
+  // dynamic categories / sizes / finishes / sanitaryware items as web chat.
+  // Missing config = engine falls back to the hardcoded defaults in flows.ts.
+  const products = await resolveProductConfig(clientId);
+
+  // Extract the clean value from free-text answers ("my name is Rajesh" →
+  // "Rajesh") before advancing — history above keeps the buyer's literal words.
+  const cleanedText = await cleanIncomingText(session.stepId, input.text);
+
   // Advance the deterministic flow.
   const advanced = advanceFlow({
     mode: session.mode,
     stepId: session.stepId,
     lead: session.lead,
     choiceLabel: input.choiceLabel,
-    text: input.text,
+    text: cleanedText,
+    products,
   });
 
   // "Start over": reset session state (history cleared by treating it fresh).
