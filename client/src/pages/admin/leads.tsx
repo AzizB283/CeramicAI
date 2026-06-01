@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Globe2, AlertTriangle } from "lucide-react";
+import { Users, Globe2, AlertTriangle, Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type LeadStatus = "new" | "contacted" | "converted" | "lost";
@@ -34,6 +34,7 @@ interface CeramicLead {
   channel: string | null;
   buyerType: string | null;
   buyerName: string | null;
+  buyerPhone: string | null;
   buyerCompany: string | null;
   buyerCountry: string | null;
   buyerCity: string | null;
@@ -216,6 +217,19 @@ export default function AdminLeads() {
                                 <div className="text-xs text-muted-foreground">
                                   {lead.buyerCompany}
                                 </div>
+                              )}
+                              {lead.buyerPhone && (
+                                <a
+                                  href={`https://wa.me/${lead.buyerPhone.replace(/[^0-9]/g, "")}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-coral-dark"
+                                  onClick={(e) => e.stopPropagation()}
+                                  data-testid={`link-phone-${lead.id}`}
+                                >
+                                  <Phone className="h-3 w-3" />
+                                  {lead.buyerPhone}
+                                </a>
                               )}
                             </div>
                           </div>
