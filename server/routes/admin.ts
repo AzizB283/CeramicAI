@@ -39,7 +39,6 @@ function resolveClient(req: Request, res: Response): string | null {
 }
 
 const LEAD_STATUSES = ["new", "contacted", "converted", "lost"] as const;
-type LeadStatus = (typeof LEAD_STATUSES)[number];
 
 // Strip secrets before returning a client row to the admin UI.
 function publicClient(client: CeramicClient): Omit<CeramicClient, "waToken"> {
@@ -104,24 +103,68 @@ adminRouter.get("/leads/:id", async (req, res) => {
   res.json(lead);
 });
 
-// PATCH /api/admin/leads/:id { status } → update lead status
+// Whitelist of lead fields an admin may edit manually. Intentionally excludes
+// product / size / finish / quantity / incoterms — those are evidence of what
+// the buyer told the bot; rewriting them would falsify the record.
+// `priority` is editable so admins can promote/demote leads after triage.
+const LEAD_PRIORITIES = ["normal", "high", "priority"] as const;
+const leadPatchSchema = z
+  .object({
+    status: z.enum(LEAD_STATUSES).optional(),
+    priority: z.enum(LEAD_PRIORITIES).optional(),
+    buyerName: z.string().trim().max(200).nullable().optional(),
+    buyerPhone: z.string().trim().max(40).nullable().optional(),
+    buyerEmail: z.string().trim().email().max(200).nullable().or(z.literal("")).optional(),
+    buyerCompany: z.string().trim().max(200).nullable().optional(),
+    buyerCity: z.string().trim().max(120).nullable().optional(),
+    buyerCountry: z.string().trim().max(120).nullable().optional(),
+    notes: z.string().trim().max(4000).nullable().optional(),
+  })
+  .strict();
+
+// PATCH /api/admin/leads/:id → admin edits contact / status / notes. Pre-existing
+// callers (the leads table's status Select) still work — status is one of the
+// allowed fields. Unknown fields are rejected by .strict() so a misbehaving
+// client can't quietly write product fields.
 adminRouter.patch("/leads/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: "invalid lead id" });
-  const { status } = req.body ?? {};
-  if (!LEAD_STATUSES.includes(status)) {
-    return res.status(400).json({ error: `status must be one of ${LEAD_STATUSES.join(", ")}` });
+  const parsed = leadPatchSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid patch", details: parsed.error.flatten() });
+  }
+  // Normalize "" → null for nullable text fields (admin "cleared" the input).
+  const patch: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(parsed.data)) {
+    if (v === undefined) continue;
+    patch[k] = typeof v === "string" && v.trim() === "" ? null : v;
+  }
+  if (Object.keys(patch).length === 0) {
+    return res.status(400).json({ error: "no editable fields provided" });
   }
   const clientId = resolveClient(req, res);
   if (!clientId) return;
   try {
-    const updated = await runWithClient(clientId, () =>
-      storage.updateLead(id, { status: status as LeadStatus }),
-    );
+    const updated = await runWithClient(clientId, () => storage.updateLead(id, patch));
     res.json(updated);
   } catch {
     res.status(404).json({ error: "lead not found" });
   }
+});
+
+// DELETE /api/admin/leads/:id → hard delete (cascades to scheduled followups
+// via storage.deleteLead). Caller must confirm in the UI.
+adminRouter.delete("/leads/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "invalid lead id" });
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
+  // Confirm the lead exists in this tenant before delete, so we can return 404
+  // properly (storage.deleteLead silently no-ops on a missing/foreign id).
+  const existing = await runWithClient(clientId, () => storage.getLead(id));
+  if (!existing) return res.status(404).json({ error: "lead not found" });
+  await runWithClient(clientId, () => storage.deleteLead(id));
+  res.status(204).end();
 });
 
 // GET /api/admin/stats → aggregate counts computed from the lead list

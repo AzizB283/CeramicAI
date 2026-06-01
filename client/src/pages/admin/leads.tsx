@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +11,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -21,8 +24,33 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Globe2, AlertTriangle, Phone, Mail } from "lucide-react";
+import { Users, Globe2, AlertTriangle, Phone, Mail, MoreHorizontal, Pencil, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type LeadStatus = "new" | "contacted" | "converted" | "lost";
@@ -98,6 +126,8 @@ export default function AdminLeads() {
   });
 
   const [priorityOnly, setPriorityOnly] = useState(false);
+  const [editingLead, setEditingLead] = useState<CeramicLead | null>(null);
+  const [deletingLead, setDeletingLead] = useState<CeramicLead | null>(null);
 
   const visibleLeads = useMemo(() => {
     if (!leads) return [];
@@ -131,6 +161,19 @@ export default function AdminLeads() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/leads"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+    },
+  });
+
+  const deleteLead = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/admin/leads/${id}`),
+    onSuccess: () => {
+      toast({ title: "Lead deleted" });
+      setDeletingLead(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/leads"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+    },
+    onError: () => {
+      toast({ title: "Failed to delete lead", variant: "destructive" });
     },
   });
 
@@ -188,6 +231,7 @@ export default function AdminLeads() {
                     <TableHead>Priority</TableHead>
                     <TableHead className="w-36">Status</TableHead>
                     <TableHead className="text-right">Created</TableHead>
+                    <TableHead className="w-10"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -285,6 +329,33 @@ export default function AdminLeads() {
                         <TableCell className="text-right text-sm text-muted-foreground">
                           {formatDate(lead.createdAt)}
                         </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                data-testid={`button-actions-${lead.id}`}
+                                aria-label="Lead actions"
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => setEditingLead(lead)}>
+                                <Pencil className="mr-2 h-4 w-4" /> Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-red-600 focus:text-red-700"
+                                onClick={() => setDeletingLead(lead)}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" /> Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
                       </TableRow>
                     );
                   })}
@@ -316,6 +387,230 @@ export default function AdminLeads() {
           </CardContent>
         </Card>
       )}
+
+      <EditLeadDialog
+        lead={editingLead}
+        onClose={() => setEditingLead(null)}
+      />
+
+      <AlertDialog open={!!deletingLead} onOpenChange={(o) => !o && setDeletingLead(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this lead?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deletingLead && (
+                <>
+                  This will permanently delete the lead from{" "}
+                  <span className="font-medium">{deletingLead.buyerName || "Unknown buyer"}</span>
+                  {deletingLead.buyerCompany ? ` (${deletingLead.buyerCompany})` : ""} and any
+                  scheduled follow-ups. This cannot be undone.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteLead.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={(e) => {
+                e.preventDefault(); // keep dialog open until the mutation finishes
+                if (deletingLead) deleteLead.mutate(deletingLead.id);
+              }}
+              disabled={deleteLead.isPending}
+              data-testid="button-confirm-delete"
+            >
+              {deleteLead.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deleting…
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  );
+}
+
+// ── Edit dialog ──────────────────────────────────────────────────────
+// Editable whitelist (matches the server's leadPatchSchema): contact +
+// business basics + status/priority/notes. Bot-captured product fields are
+// intentionally NOT editable — those are evidence of what the buyer said.
+
+const STATUSES: LeadStatus[] = ["new", "contacted", "converted", "lost"];
+const PRIORITIES: LeadPriority[] = ["normal", "high", "priority"];
+
+type EditableField =
+  | "buyerName"
+  | "buyerPhone"
+  | "buyerEmail"
+  | "buyerCompany"
+  | "buyerCity"
+  | "buyerCountry"
+  | "notes";
+
+interface EditDraft {
+  buyerName: string;
+  buyerPhone: string;
+  buyerEmail: string;
+  buyerCompany: string;
+  buyerCity: string;
+  buyerCountry: string;
+  notes: string;
+  status: LeadStatus;
+  priority: LeadPriority;
+}
+
+function leadToDraft(lead: CeramicLead): EditDraft {
+  return {
+    buyerName: lead.buyerName ?? "",
+    buyerPhone: lead.buyerPhone ?? "",
+    buyerEmail: lead.buyerEmail ?? "",
+    buyerCompany: lead.buyerCompany ?? "",
+    buyerCity: lead.buyerCity ?? "",
+    buyerCountry: lead.buyerCountry ?? "",
+    notes: lead.notes ?? "",
+    status: (lead.status ?? "new") as LeadStatus,
+    priority: (lead.priority ?? "normal") as LeadPriority,
+  };
+}
+
+function EditLeadDialog({ lead, onClose }: { lead: CeramicLead | null; onClose: () => void }) {
+  const { toast } = useToast();
+  const [draft, setDraft] = useState<EditDraft | null>(lead ? leadToDraft(lead) : null);
+
+  // Reset the draft whenever the dialog opens with a (possibly different) lead.
+  useEffect(() => {
+    setDraft(lead ? leadToDraft(lead) : null);
+  }, [lead]);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      if (!lead || !draft) return;
+      // Build a minimal patch: only fields that actually changed. Empty
+      // strings on text fields get sent as "" so the server normalizes them
+      // to NULL (the admin cleared the value).
+      const patch: Record<string, unknown> = {};
+      const textKeys: EditableField[] = [
+        "buyerName", "buyerPhone", "buyerEmail",
+        "buyerCompany", "buyerCity", "buyerCountry", "notes",
+      ];
+      for (const k of textKeys) {
+        const before = (lead[k] ?? "") as string;
+        if (draft[k] !== before) patch[k] = draft[k];
+      }
+      if (draft.status !== (lead.status ?? "new")) patch.status = draft.status;
+      if (draft.priority !== (lead.priority ?? "normal")) patch.priority = draft.priority;
+      if (Object.keys(patch).length === 0) return; // no-op save
+      await apiRequest("PATCH", `/api/admin/leads/${lead.id}`, patch);
+    },
+    onSuccess: () => {
+      toast({ title: "Lead updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/leads"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      onClose();
+    },
+    onError: () => toast({ title: "Failed to save", variant: "destructive" }),
+  });
+
+  if (!draft) return null;
+  const set = (k: keyof EditDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setDraft({ ...draft, [k]: e.target.value });
+
+  return (
+    <Dialog open={!!lead} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Edit lead</DialogTitle>
+          <DialogDescription>
+            Update contact info, status, or notes. Product details captured by the bot are not editable.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-3 py-2">
+          <div className="grid gap-1.5">
+            <Label htmlFor="ed-name">Name</Label>
+            <Input id="ed-name" value={draft.buyerName} onChange={set("buyerName")} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="ed-phone">Phone</Label>
+              <Input id="ed-phone" value={draft.buyerPhone} onChange={set("buyerPhone")} placeholder="+91…" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="ed-email">Email</Label>
+              <Input id="ed-email" type="email" value={draft.buyerEmail} onChange={set("buyerEmail")} />
+            </div>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="ed-company">Company</Label>
+            <Input id="ed-company" value={draft.buyerCompany} onChange={set("buyerCompany")} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="ed-city">City</Label>
+              <Input id="ed-city" value={draft.buyerCity} onChange={set("buyerCity")} />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="ed-country">Country</Label>
+              <Input id="ed-country" value={draft.buyerCountry} onChange={set("buyerCountry")} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="ed-status">Status</Label>
+              <Select value={draft.status} onValueChange={(v) => setDraft({ ...draft, status: v as LeadStatus })}>
+                <SelectTrigger id="ed-status" className="capitalize">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUSES.map((s) => (
+                    <SelectItem key={s} value={s} className="capitalize">{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="ed-priority">Priority</Label>
+              <Select value={draft.priority} onValueChange={(v) => setDraft({ ...draft, priority: v as LeadPriority })}>
+                <SelectTrigger id="ed-priority" className="capitalize">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRIORITIES.map((p) => (
+                    <SelectItem key={p} value={p} className="capitalize">{p}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="ed-notes">Notes</Label>
+            <Textarea
+              id="ed-notes"
+              value={draft.notes}
+              onChange={set("notes")}
+              rows={3}
+              placeholder="Internal notes (only visible to admins)"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={save.isPending}>Cancel</Button>
+          <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="button-save-lead">
+            {save.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving…
+              </>
+            ) : (
+              "Save changes"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
