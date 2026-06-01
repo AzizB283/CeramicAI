@@ -8,3 +8,7 @@ client/dist
 !.env.example
 .superpowers/
 Clinic-ai/
+
+# Local scratch / test pages used to manually embed the widget against prod.
+/test.html
+

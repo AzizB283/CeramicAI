@@ -108,10 +108,13 @@ export default function DemoChat({ variant = "demo" }: { variant?: ChatVariant }
   return (
     <div
       className={cn(
-        "flex flex-col items-center",
-        // Embed: fill the iframe edge-to-edge, no page chrome. Demo: centered
-        // card on the cream page with breathing room and the mode toggle.
-        isEmbed ? "min-h-full bg-white" : "min-h-full bg-cream px-4 py-8",
+        // Embed: fill the iframe edge-to-edge, no page chrome. The chat window
+        // is a flex child that takes the full height, so the composer sits
+        // pinned to the bottom of the iframe instead of hugging the messages.
+        // Demo: centered card on the cream page with breathing room.
+        isEmbed
+          ? "flex h-full w-full flex-col bg-white"
+          : "flex min-h-full flex-col items-center bg-cream px-4 py-8",
       )}
     >
       {/* Mode toggle — demo only. The embedded widget runs the factory's own
@@ -137,12 +140,13 @@ export default function DemoChat({ variant = "demo" }: { variant?: ChatVariant }
         </div>
       )}
 
-      {/* Chat window. Demo: fixed-height card. Embed: fills the iframe height. */}
+      {/* Chat window. Demo: fixed-height card. Embed: fills the iframe height
+          via flex-1 + min-h-0 so the inner overflow-y-auto thread can shrink. */}
       <div
         className={cn(
           "flex w-full flex-col overflow-hidden bg-white",
           isEmbed
-            ? "h-full max-w-none rounded-none border-0 shadow-none"
+            ? "min-h-0 flex-1 max-w-none rounded-none border-0 shadow-none"
             : "h-[32rem] max-w-sm rounded-2xl border border-ink/10 shadow-xl",
         )}
       >
