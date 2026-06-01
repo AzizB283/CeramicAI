@@ -17,7 +17,6 @@ import {
   CalendarClock,
   AlertTriangle,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import {
   ResponsiveContainer,
   BarChart,
@@ -158,21 +157,16 @@ export default function AdminDashboard() {
 
       {priorityWaiting > 0 && (
         <Link href="/admin/leads">
-          <Card
-            className={cn(
-              "cursor-pointer border-red-300 bg-red-50 transition hover:border-red-400 hover:bg-red-100",
-              "dark:border-red-900 dark:bg-red-950/40 dark:hover:bg-red-950/60",
-            )}
-          >
+          <Card className="cursor-pointer border-red-300 bg-red-50 transition hover:border-red-400 hover:bg-red-100">
             <CardContent className="flex items-center gap-4 py-5">
               <div className="grid h-12 w-12 place-items-center rounded-full bg-red-500/15 text-red-600">
                 <AlertTriangle className="h-6 w-6" />
               </div>
               <div className="flex-1">
-                <div className="text-2xl font-bold text-red-700 dark:text-red-300">
+                <div className="text-2xl font-bold text-red-700">
                   {priorityWaiting} priority lead{priorityWaiting === 1 ? "" : "s"} waiting
                 </div>
-                <p className="text-sm text-red-700/80 dark:text-red-300/80">
+                <p className="text-sm text-red-700/80">
                   Distributor / exclusive-rights inquiries that haven't been converted or lost yet.
                   Click to view.
                 </p>

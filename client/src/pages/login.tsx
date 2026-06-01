@@ -12,7 +12,6 @@ import {
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -72,7 +71,6 @@ export default function LoginPage() {
               Ceramic<span className="text-coral">Bot</span>
             </span>
           </a>
-          <ThemeToggle />
         </div>
       </nav>
 

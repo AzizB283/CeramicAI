@@ -1,6 +1,5 @@
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { LogOut, Shield } from "lucide-react";
 
@@ -28,7 +27,6 @@ export function SuperAdminLayout({ children }: { children: React.ReactNode }) {
             <span className="hidden text-sm text-muted-foreground sm:inline">
               {user?.name || user?.username}
             </span>
-            <ThemeToggle />
             <Button
               variant="ghost"
               size="icon"

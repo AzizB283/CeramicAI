@@ -201,7 +201,7 @@ export default function AdminLeads() {
           <p className="text-muted-foreground">Buyer inquiries captured by the bot</p>
         </div>
         {priorityCount > 0 && (
-          <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm dark:border-red-900 dark:bg-red-950/40">
+          <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm">
             <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
             <Label htmlFor="priority-only" className="cursor-pointer">
               Priority only{" "}
@@ -247,7 +247,7 @@ export default function AdminLeads() {
                           // Red left-edge ribbon for priority rows; subtle coral
                           // tint for distributor inquiries (often the same row,
                           // priority wins visually).
-                          isPriority && "border-l-4 border-l-red-500 bg-red-50/40 dark:bg-red-950/20",
+                          isPriority && "border-l-4 border-l-red-500 bg-red-50/40",
                           !isPriority && lead.isDistributorInquiry && "bg-coral/5",
                         )}
                       >
