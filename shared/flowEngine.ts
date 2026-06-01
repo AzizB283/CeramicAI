@@ -185,23 +185,64 @@ function resolveOptions(
   return fallback;
 }
 
+/**
+ * Steps that are safe to auto-skip when their `field` is already populated.
+ * Used to avoid asking the WhatsApp buyer for their phone when the sender
+ * header already gave us one. Whitelist (not "any filled field") because
+ * most steps SHOULD re-ask if the value happens to match — only contact-info
+ * steps are truly idempotent.
+ */
+const SKIPPABLE_IF_FIELD_SET = new Set<StepId>(["f_phone", "x_phone", "x_dist_phone"]);
+
+function resolveStep(
+  stepId: StepId,
+  lead: LeadDraft,
+  products?: ProductConfig,
+  guard = 6,
+): { stepId: StepId; lead: LeadDraft } {
+  // Walk forward through any auto-skippable steps whose field is already set.
+  // `guard` caps the walk so a misconfigured graph can't infinite-loop here.
+  let current = stepId;
+  let walked = lead;
+  for (let i = 0; i < guard; i++) {
+    const step = STEPS[current];
+    const field = step.field;
+    if (
+      SKIPPABLE_IF_FIELD_SET.has(current) &&
+      field &&
+      typeof walked[field] === "string" &&
+      (walked[field] as string).trim() !== "" &&
+      step.next
+    ) {
+      current = step.next;
+      continue;
+    }
+    break;
+  }
+  return { stepId: current, lead: walked };
+  void products; // products only matter for option rendering, not skip walk
+}
+
 function snapshot(
   mode: Mode,
   stepId: StepId,
   lead: LeadDraft,
   products?: ProductConfig,
 ): FlowSnapshot {
-  const step = STEPS[stepId];
+  // Auto-skip steps that ask for info we already have (e.g. WhatsApp has the
+  // sender's phone, so f_phone is skipped).
+  const resolved = resolveStep(stepId, lead, products);
+  const step = STEPS[resolved.stepId];
   return {
-    stepId,
-    lead,
-    botMessages: step.bot.map((line) => render(line, mode, lead)),
-    quickReplies: resolveOptions(stepId, step.options, lead, products),
+    stepId: resolved.stepId,
+    lead: resolved.lead,
+    botMessages: step.bot.map((line) => render(line, mode, resolved.lead)),
+    quickReplies: resolveOptions(resolved.stepId, step.options, resolved.lead, products),
     inputKind: step.input === "text" ? "text" : "choice",
     placeholder: step.placeholder,
     catalog: step.catalog,
     terminal: !!step.terminal,
-    ownerAlert: step.terminal ? buildOwnerAlert(mode, lead) : null,
+    ownerAlert: step.terminal ? buildOwnerAlert(mode, resolved.lead) : null,
     startOver: false,
   };
 }
@@ -257,7 +298,9 @@ export function advanceFlow(input: AdvanceInput): FlowSnapshot {
     // a chip label the user picks but the resolved list didn't contain.
     if (!opt) opt = (step.options ?? []).find((o) => o.label === choiceLabel);
     if (!opt) return snapshot(mode, stepId, lead, products);
-    if (step.field) lead[step.field] = (opt.value ?? opt.label) as never;
+    // skipField = an opt-out for chips like "Skip" on an optional text step
+    // (e.g. f_email's Skip shouldn't store "Skip" as the buyer's email).
+    if (step.field && !opt.skipField) lead[step.field] = (opt.value ?? opt.label) as never;
     if (opt.priority) lead.priority = "priority";
     let next = opt.next ?? step.next;
     // After picking a product category, reroute through the sanitaryware

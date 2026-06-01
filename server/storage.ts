@@ -65,6 +65,7 @@ function encryptLeadFields<T extends Partial<InsertCeramicLead>>(
     out.buyerPhone = encrypt(data.buyerPhone);
     out.buyerPhoneHash = hashPhone(data.buyerPhone);
   }
+  if (data.buyerEmail != null) out.buyerEmail = encrypt(data.buyerEmail);
   return out;
 }
 
@@ -80,6 +81,7 @@ function decryptLead(row: CeramicLead): CeramicLead {
     ...row,
     buyerName: safeDecrypt(row.buyerName),
     buyerPhone: safeDecrypt(row.buyerPhone),
+    buyerEmail: safeDecrypt(row.buyerEmail),
   };
 }
 

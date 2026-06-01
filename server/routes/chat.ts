@@ -20,6 +20,7 @@ import { storage } from "../storage";
 import { answerSideQuestion } from "../services/openaiAsk";
 import { cleanIncomingText } from "../services/entityExtraction";
 import { pickCatalogue } from "../services/catalogueMatcher";
+import { validateContactTurn } from "../services/contactValidation";
 import {
   generateBotReply,
   type ChatHistoryTurn,
@@ -31,6 +32,8 @@ function buildLeadInsert(sessionId: string, l: LeadDraft): InsertCeramicLead {
     channel: "web",
     buyerType: l.buyerType,
     buyerName: l.buyerName,
+    buyerPhone: l.buyerPhone, // asked on web (WhatsApp captures from sender)
+    buyerEmail: l.buyerEmail,
     buyerCompany: l.buyerCompany,
     buyerCountry: l.country ?? l.distributorCountry,
     buyerCity: l.buyerCity,
@@ -187,14 +190,42 @@ chatRouter.post("/message", async (req, res) => {
   // Extract the clean value from free-text answers ("my name is Rajesh" →
   // "Rajesh") before advancing — history above keeps the buyer's literal words.
   const cleanedText = await cleanIncomingText(session.stepId, text);
+  const priorStepId = session.stepId;
   const advanced = advanceFlow({
     mode: session.mode,
-    stepId: session.stepId,
+    stepId: priorStepId,
     lead: session.lead,
     choiceLabel,
     text: cleanedText,
     products,
   });
+
+  // Contact validation: if the buyer just typed something into a phone/email
+  // step and it's clearly invalid, re-ask once. After one re-ask we accept
+  // whatever they type (lead capture > perfect data).
+  const validation = validateContactTurn(priorStepId, advanced.lead, session.validationRetries);
+  if (validation.action === "reask") {
+    // Un-write the bad field and rewind to the prior step.
+    const correctedLead = { ...advanced.lead, [validation.field]: undefined };
+    const rewound = advanceFlow({
+      mode: session.mode,
+      // Trick to "stay" on priorStepId — we don't actually re-advance; just
+      // produce a fresh snapshot rooted there. advanceFlow with no input is a
+      // no-op that returns the current step's snapshot.
+      stepId: priorStepId,
+      lead: correctedLead,
+      products,
+    });
+    setSession(sessionId, {
+      mode: session.mode,
+      stepId: rewound.stepId,
+      lead: rewound.lead,
+      clientId,
+    });
+    const bubbles = [validation.message, ...rewound.botMessages];
+    for (const b of bubbles) appendHistory(sessionId, { role: "bot", text: b });
+    return res.json({ ...rewound, botMessages: bubbles });
+  }
 
   // "Start over": treat as a fresh welcome — re-narrate from scratch with no
   // history. The session itself is being reset to the entry step by the

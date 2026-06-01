@@ -23,6 +23,11 @@ interface StoredSession extends SessionState {
    * Not the source of truth for the lead (the FSM is) — purely UI/narration.
    */
   history: ChatHistoryTurn[];
+  /**
+   * Re-ask counter per step, used by contactValidation to allow ONE polite
+   * re-prompt on bad email/phone input before accepting whatever comes next.
+   */
+  validationRetries: Map<StepId, number>;
 }
 
 const TTL_MS = 30 * 60 * 1000;
@@ -39,6 +44,7 @@ export function createSession(state: SessionState): StoredSession {
     id,
     lastSeen: Date.now(),
     history: [],
+    validationRetries: new Map(),
     ...state,
   };
   sessions.set(id, stored);

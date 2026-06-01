@@ -59,6 +59,7 @@ export const ceramicLeads = pgTable(
     buyerName: text("buyer_name"), // encrypted at application layer
     buyerPhone: text("buyer_phone"), // encrypted at application layer
     buyerPhoneHash: text("buyer_phone_hash"), // HMAC for indexed lookup
+    buyerEmail: text("buyer_email"), // encrypted at application layer
     buyerCompany: text("buyer_company"),
     buyerCountry: text("buyer_country"),
     buyerCity: text("buyer_city"),

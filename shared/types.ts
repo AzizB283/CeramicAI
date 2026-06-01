@@ -44,6 +44,12 @@ export interface QuickReply {
   value?: string;
   /** Marks this choice as a priority/high-value path (distributor). */
   priority?: boolean;
+  /**
+   * When true, advancing via this chip does NOT write the step's `field` —
+   * used for "Skip" chips on optional text steps (e.g. f_email's Skip chip
+   * shouldn't store "Skip" as the buyer's email).
+   */
+  skipField?: boolean;
 }
 
 export interface FlowStep {
@@ -84,8 +90,10 @@ export interface LeadDraft {
   buyerName?: string;
   buyerCity?: string;
   buyerCompany?: string;
-  /** Captured automatically on WhatsApp from the sender's number. */
+  /** Captured automatically on WhatsApp from the sender's number; asked on web. */
   buyerPhone?: string;
+  /** Asked on both channels; optional on WhatsApp. */
+  buyerEmail?: string;
   priority?: "normal" | "high" | "priority";
   /** Sub-item when productCategory === "sanitaryware" (toilet, wash basin, …). */
   sanitaryItem?: string;
@@ -106,6 +114,8 @@ export type StepId =
   | "f_catalog"
   | "f_name"
   | "f_city"
+  | "f_phone"
+  | "f_email"
   | "f_done"
   // exporter mode
   | "x_welcome"
@@ -118,6 +128,8 @@ export type StepId =
   | "x_catalog"
   | "x_name"
   | "x_company"
+  | "x_phone"
+  | "x_email"
   | "x_done"
   // exporter — sample request branch
   | "x_sample_product"
@@ -130,4 +142,7 @@ export type StepId =
   | "x_dist_imports"
   | "x_dist_volume"
   | "x_dist_exclusive"
+  | "x_dist_name"
+  | "x_dist_phone"
+  | "x_dist_email"
   | "x_dist_done";

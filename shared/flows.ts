@@ -127,12 +127,31 @@ const FACTORY_STEPS: FlowStep[] = [
     input: "text",
     field: "buyerCity",
     placeholder: "Type your city…",
+    next: "f_phone",
+  },
+  // f_phone is auto-skipped (by the engine) when buyerPhone is already set —
+  // which is the case on WhatsApp (sender header). Web buyers always see it.
+  {
+    id: "f_phone",
+    bot: ["What's the best phone number to reach you on?"],
+    input: "text",
+    field: "buyerPhone",
+    placeholder: "+91 98765 43210",
+    next: "f_email",
+  },
+  {
+    id: "f_email",
+    bot: ["And your email? (or tap Skip)"],
+    input: "text",
+    field: "buyerEmail",
+    placeholder: "you@company.com",
     next: "f_done",
+    options: [{ label: "Skip", next: "f_done", skipField: true }],
   },
   {
     id: "f_done",
     bot: [
-      "Thank you, {name}! Our sales team will reach you on this WhatsApp number within 2 hours.",
+      "Thank you, {name}! Our sales team will reach out within 2 hours.",
     ],
     input: "choice",
     terminal: true,
@@ -258,11 +277,29 @@ const EXPORTER_STEPS: FlowStep[] = [
     input: "text",
     field: "buyerCompany",
     placeholder: "Company name…",
+    next: "x_phone",
+  },
+  // x_phone is auto-skipped on WhatsApp (sender phone already on the lead).
+  {
+    id: "x_phone",
+    bot: ["What's the best phone number to reach you on?"],
+    input: "text",
+    field: "buyerPhone",
+    placeholder: "+1 555 0123",
+    next: "x_email",
+  },
+  {
+    id: "x_email",
+    bot: ["And your email? (or tap Skip)"],
+    input: "text",
+    field: "buyerEmail",
+    placeholder: "you@company.com",
     next: "x_done",
+    options: [{ label: "Skip", next: "x_done", skipField: true }],
   },
   {
     id: "x_done",
-    bot: ["Thank you, {name}. We will contact you on this number shortly."],
+    bot: ["Thank you, {name}. Our export manager will reach out shortly."],
     input: "choice",
     terminal: true,
     options: [{ label: "Start over", next: "x_welcome" }],
@@ -353,17 +390,45 @@ const EXPORTER_STEPS: FlowStep[] = [
     bot: ["Are you looking for exclusive distribution rights in your region?"],
     input: "choice",
     field: "exclusiveRights",
-    next: "x_dist_done",
+    next: "x_dist_name",
     options: [
       { label: "Yes", value: "YES", priority: true },
       { label: "No", value: "NO" },
       { label: "Open to discuss", value: "MAYBE" },
     ],
   },
+  // Priority distributor leads — capture name + contact so the director can
+  // actually follow up (previously this branch had no contact capture).
+  {
+    id: "x_dist_name",
+    bot: ["Great. Before we connect — what's your name?"],
+    input: "text",
+    field: "buyerName",
+    placeholder: "Type your name…",
+    next: "x_dist_phone",
+  },
+  // Auto-skipped on WhatsApp (sender phone already known).
+  {
+    id: "x_dist_phone",
+    bot: ["Best phone number to reach you on?"],
+    input: "text",
+    field: "buyerPhone",
+    placeholder: "+1 555 0123",
+    next: "x_dist_email",
+  },
+  {
+    id: "x_dist_email",
+    bot: ["And your email? (or tap Skip)"],
+    input: "text",
+    field: "buyerEmail",
+    placeholder: "you@company.com",
+    next: "x_dist_done",
+    options: [{ label: "Skip", next: "x_dist_done", skipField: true }],
+  },
   {
     id: "x_dist_done",
     bot: [
-      "Our director will personally call you within 24 hours to discuss partnership.",
+      "Thank you, {name}. Our director will personally call you within 24 hours to discuss partnership.",
     ],
     input: "choice",
     terminal: true,

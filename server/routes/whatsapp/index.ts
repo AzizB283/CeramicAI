@@ -19,6 +19,7 @@ import {
 import { pickCatalogue } from "../../services/catalogueMatcher";
 import { resolveProductConfig } from "../../services/productConfig";
 import { cleanIncomingText } from "../../services/entityExtraction";
+import { validateContactTurn } from "../../services/contactValidation";
 
 /**
  * WhatsApp Business Cloud API webhook (Meta Graph API v24).
@@ -46,6 +47,8 @@ interface WhatsAppSession {
   lead: LeadDraft;
   history: ChatHistoryTurn[];
   lastSeen: number;
+  /** Re-ask counter per step for contact-info validation. */
+  validationRetries: Map<StepId, number>;
 }
 
 const TTL_MS = 24 * 60 * 60 * 1000; // 24h on WhatsApp — buyers come back the next day
@@ -71,6 +74,7 @@ function getOrCreateSession(clientId: string, phone: string, mode: Mode): WhatsA
     lead: {},
     history: [],
     lastSeen: Date.now(),
+    validationRetries: new Map(),
   };
   waSessions.set(key, fresh);
   return fresh;
@@ -110,6 +114,7 @@ function buildLeadInsert(sessionId: string, l: LeadDraft): InsertCeramicLead {
     buyerType: l.buyerType,
     buyerName: l.buyerName,
     buyerPhone: l.buyerPhone, // captured automatically on WhatsApp (from sender)
+    buyerEmail: l.buyerEmail, // asked at end of flow (optional on WhatsApp)
     buyerCompany: l.buyerCompany,
     buyerCountry: l.country ?? l.distributorCountry,
     buyerCity: l.buyerCity,
@@ -189,14 +194,38 @@ async function processInboundMessage(
   const cleanedText = await cleanIncomingText(session.stepId, input.text);
 
   // Advance the deterministic flow.
+  const priorStepId = session.stepId;
   const advanced = advanceFlow({
     mode: session.mode,
-    stepId: session.stepId,
+    stepId: priorStepId,
     lead: session.lead,
     choiceLabel: input.choiceLabel,
     text: cleanedText,
     products,
   });
+
+  // Contact validation: re-ask once if the buyer just typed garbage as a
+  // phone/email. Mirrors the web /message handler.
+  const validation = validateContactTurn(priorStepId, advanced.lead, session.validationRetries);
+  if (validation.action === "reask") {
+    const correctedLead = { ...advanced.lead, [validation.field]: undefined };
+    const rewound = advanceFlow({
+      mode: session.mode,
+      stepId: priorStepId,
+      lead: correctedLead,
+      products,
+    });
+    session.stepId = rewound.stepId;
+    session.lead = rewound.lead;
+    appendHistory(session, { role: "bot", text: validation.message });
+    for (const b of rewound.botMessages) appendHistory(session, { role: "bot", text: b });
+    // Send the corrective + re-prompt bubbles to the buyer immediately.
+    await runWithClient(clientId, async () => {
+      await sendTextMessage(from, validation.message);
+      for (const b of rewound.botMessages) await sendTextMessage(from, b);
+    });
+    return;
+  }
 
   // "Start over": reset session state (history cleared by treating it fresh).
   if (advanced.startOver) {
@@ -204,6 +233,7 @@ async function processInboundMessage(
     session.stepId = ENTRY[mode];
     session.lead = { buyerPhone: from };
     session.history = [];
+    session.validationRetries = new Map();
   } else {
     session.stepId = advanced.stepId;
     session.lead = advanced.lead;

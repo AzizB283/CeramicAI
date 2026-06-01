@@ -1,0 +1,1 @@
+ALTER TABLE "ceramic_leads" ADD COLUMN "buyer_email" text;

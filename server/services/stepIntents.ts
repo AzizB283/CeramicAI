@@ -35,8 +35,12 @@ export const STEP_INTENTS: Record<StepId, string> = {
     "Ask the buyer for their name (free text). Used by the 'order query' branch where the catalog step is skipped.",
   f_city:
     "Thank them by name. Ask which city they're in.",
+  f_phone:
+    "Ask for the best phone number to reach them on. Free text. Keep it to one short message.",
+  f_email:
+    "Ask for their email — mention they can tap Skip if they prefer not to share. One short message.",
   f_done:
-    "Thank them by name. Confirm the sales team will contact them on WhatsApp within 2 hours. Friendly closing. One short message.",
+    "Thank them by name. Confirm the sales team will contact them within 2 hours. Friendly closing. One short message.",
 
   // ── Exporter mode (international buyer) ────────────────────────────
   x_welcome:
@@ -59,8 +63,12 @@ export const STEP_INTENTS: Record<StepId, string> = {
     "Ask the international buyer for their name (free text). Used by the 'order query' branch.",
   x_company:
     "Thank them by name. Ask for their company name.",
+  x_phone:
+    "Ask for the best phone number to reach them on. Free text. One short message.",
+  x_email:
+    "Ask for their email — mention they can tap Skip if they prefer not to share. One short message.",
   x_done:
-    "Thank them by name and company. Confirm follow-up shortly. One short message.",
+    "Thank them by name and company. Confirm the export manager will reach out shortly. One short message.",
 
   // ── Exporter sample-request branch ─────────────────────────────────
   x_sample_product:
@@ -83,8 +91,14 @@ export const STEP_INTENTS: Record<StepId, string> = {
     "Ask their approximate annual tile import volume. Chips: <50, 50–200, 200–1000, 1000+ containers.",
   x_dist_exclusive:
     "Ask if they're looking for exclusive distribution rights in their region. Chips: Yes / No / Open to discuss.",
+  x_dist_name:
+    "Warm, professional. Say before connecting, you need a few details. Ask their name (free text).",
+  x_dist_phone:
+    "Ask for the best phone number to reach them on. Free text. One short message.",
+  x_dist_email:
+    "Ask for their email — mention they can tap Skip if they prefer not to share. One short message.",
   x_dist_done:
-    "Strong closing: confirm the director will personally call them within 24 hours to discuss partnership. One short, warm message.",
+    "Strong, warm closing: thank them by name and confirm the director will personally call within 24 hours to discuss partnership. One short message.",
 };
 
 /**
