@@ -24,6 +24,10 @@ export const ceramicClients = pgTable("ceramic_clients", {
   mode: text("mode").notNull(), // "factory" | "exporter"
   ownerName: text("owner_name"),
   ownerWhatsapp: text("owner_whatsapp"), // owner phone for alerts
+  // Comma-separated list of up to 3 email recipients for new-lead alerts.
+  // Stored as plain text (business email, not buyer PII). The first is the
+  // owner; the rest let a sales team / colleague get the same notification.
+  ownerEmail: text("owner_email"),
   catalogUrl: text("catalog_url"),
   exportCatalogUrl: text("export_catalog_url"),
   // WhatsApp Business Cloud API credentials (per-client; encrypted at the

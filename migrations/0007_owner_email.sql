@@ -1,0 +1,1 @@
+ALTER TABLE "ceramic_clients" ADD COLUMN "owner_email" text;

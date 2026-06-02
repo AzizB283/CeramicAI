@@ -20,6 +20,7 @@ import { pickCatalogue } from "../../services/catalogueMatcher";
 import { resolveProductConfig } from "../../services/productConfig";
 import { cleanIncomingText } from "../../services/entityExtraction";
 import { validateContactTurn } from "../../services/contactValidation";
+import { notifyNewLead } from "../../services/leadNotification";
 
 /**
  * WhatsApp Business Cloud API webhook (Meta Graph API v24).
@@ -275,11 +276,15 @@ async function processInboundMessage(
 
   // Persist the lead once, on a terminal step that's NOT a "Start over" reset.
   if (snap.terminal && !snap.startOver) {
-    await runWithClient(clientId, () =>
+    const lead = await runWithClient(clientId, () =>
       storage.createLead(
         buildLeadInsert(`wa:${from}:${Date.now()}`, snap.lead),
       ),
     );
+    // Email the factory's configured recipients (owner + team). Fire-and-forget
+    // so a slow/failed email doesn't hold up the WhatsApp reply pipeline.
+    const client = await storage.getClient(clientId);
+    void notifyNewLead(client, lead);
     // Drop the session post-persist so the next message starts a fresh flow.
     deleteSession(clientId, from);
   }

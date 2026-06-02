@@ -17,6 +17,7 @@ import {
 import { ensureDemoClient } from "../seed";
 import { runWithClient } from "../middleware/tenant";
 import { storage } from "../storage";
+import { notifyNewLead } from "../services/leadNotification";
 import { answerSideQuestion } from "../services/openaiAsk";
 import { cleanIncomingText } from "../services/entityExtraction";
 import { pickCatalogue } from "../services/catalogueMatcher";
@@ -255,9 +256,12 @@ chatRouter.post("/message", async (req, res) => {
 
   // Persist the captured lead once, on a terminal step that is NOT a "Start over" reset.
   if (narrated.terminal && !narrated.startOver) {
-    await runWithClient(clientId, () =>
+    const lead = await runWithClient(clientId, () =>
       storage.createLead(buildLeadInsert(sessionId, narrated.lead)),
     );
+    // Email the factory's configured recipients (owner + team). Fire-and-forget:
+    // the lead is already saved, so a slow/failed email must not block the reply.
+    void notifyNewLead(client, lead);
     // Delete the session post-persist so a terminal replay (retry/double-submit)
     // gets a clean 404 instead of re-inserting the same lead (sessionId is not unique).
     deleteSession(sessionId);

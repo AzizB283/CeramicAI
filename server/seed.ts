@@ -32,6 +32,7 @@ export async function ensureDemoClient(): Promise<string> {
     mode: "factory",
     ownerName: "Demo Owner",
     ownerWhatsapp: "+910000000000",
+    ownerEmail: "owner@example.com",
     catalogUrl: "https://aurexauto.com/demo/catalog-factory.pdf",
     exportCatalogUrl: "https://aurexauto.com/demo/catalog-export.pdf",
   });

@@ -53,6 +53,7 @@ const EDITABLE_CLIENT_FIELDS = [
   "mode",
   "ownerName",
   "ownerWhatsapp",
+  "ownerEmail",
   "catalogUrl",
   "exportCatalogUrl",
   "waPhoneId",

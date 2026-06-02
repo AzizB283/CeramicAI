@@ -25,6 +25,7 @@ const createClientSchema = z.object({
   mode: z.enum(["factory", "exporter"]),
   ownerName: z.string().trim().max(120).optional(),
   ownerWhatsapp: z.string().trim().max(40).optional(),
+  ownerEmail: z.string().trim().max(200).optional(),
   adminUsername: z.string().trim().min(3).max(50),
   adminPassword: z.string().min(8).max(200),
   adminName: z.string().trim().max(120).optional(),
@@ -35,6 +36,7 @@ const updateClientSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   ownerName: z.string().trim().max(120).nullable().optional(),
   ownerWhatsapp: z.string().trim().max(40).nullable().optional(),
+  ownerEmail: z.string().trim().max(200).nullable().optional(),
   active: z.boolean().optional(),
 });
 
@@ -104,6 +106,7 @@ superadminRouter.post("/clients", async (req, res) => {
     mode: d.mode,
     ownerName: d.ownerName ?? null,
     ownerWhatsapp: d.ownerWhatsapp ?? null,
+    ownerEmail: d.ownerEmail ?? null,
   });
 
   const admin = await storage.createAdminUser({

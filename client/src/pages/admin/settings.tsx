@@ -22,6 +22,7 @@ interface CeramicSettings {
   mode: string;
   ownerName: string | null;
   ownerWhatsapp: string | null;
+  ownerEmail: string | null;
   catalogUrl: string | null;
   exportCatalogUrl: string | null;
   widgetName: string | null;
@@ -35,6 +36,7 @@ type SettingsForm = {
   name: string;
   ownerName: string;
   ownerWhatsapp: string;
+  ownerEmail: string;
   catalogUrl: string;
   exportCatalogUrl: string;
   widgetName: string;
@@ -46,6 +48,7 @@ const EMPTY_FORM: SettingsForm = {
   name: "",
   ownerName: "",
   ownerWhatsapp: "",
+  ownerEmail: "",
   catalogUrl: "",
   exportCatalogUrl: "",
   widgetName: "",
@@ -67,6 +70,7 @@ export default function AdminSettings() {
         name: settings.name ?? "",
         ownerName: settings.ownerName ?? "",
         ownerWhatsapp: settings.ownerWhatsapp ?? "",
+        ownerEmail: settings.ownerEmail ?? "",
         catalogUrl: settings.catalogUrl ?? "",
         exportCatalogUrl: settings.exportCatalogUrl ?? "",
         widgetName: settings.widgetName ?? "",
@@ -162,6 +166,20 @@ export default function AdminSettings() {
                   data-testid="input-owner-whatsapp"
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ownerEmail">Lead alert emails</Label>
+              <Input
+                id="ownerEmail"
+                value={form.ownerEmail}
+                onChange={set("ownerEmail")}
+                placeholder="owner@factory.com, sales@factory.com"
+                data-testid="input-owner-email"
+              />
+              <p className="text-xs text-muted-foreground">
+                Where new-lead notifications are sent. Add up to 3 addresses,
+                separated by commas — e.g. the owner plus your sales team.
+              </p>
             </div>
           </CardContent>
         </Card>
