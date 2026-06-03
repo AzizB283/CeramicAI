@@ -80,6 +80,7 @@ export const ceramicLeads = pgTable(
     ownerNotified: boolean("owner_notified").default(false),
     status: text("status").default("new"), // new | contacted | converted | lost
     notes: text("notes"),
+    emailThreadId: integer("email_thread_id"), // FK set after email_threads exists (see relation note)
     createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   },
   (t) => [
@@ -252,3 +253,66 @@ export const insertSuperadminActionSchema = createInsertSchema(superadminActions
 });
 export type SuperadminAction = typeof superadminActions.$inferSelect;
 export type InsertSuperadminAction = z.infer<typeof insertSuperadminActionSchema>;
+
+// ── email_connections — one connected Gmail account per client ──────────
+// The exporter's own inbox. OAuth tokens are AES-GCM encrypted at the app
+// layer (same v2: format as WhatsApp creds). One row per client (unique).
+export const emailConnections = pgTable(
+  "email_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clientId: uuid("client_id").notNull().unique().references(() => ceramicClients.id),
+    gmailAddress: text("gmail_address").notNull(), // plain — business identity, shown in UI
+    accessToken: text("access_token").notNull(), // encrypted v2:…
+    refreshToken: text("refresh_token").notNull(), // encrypted v2:…
+    tokenExpiry: timestamp("token_expiry"),
+    historyId: text("history_id"), // Gmail incremental-sync cursor
+    lastCheckedAt: timestamp("last_checked_at"),
+    active: boolean("active").default(true).notNull(),
+    connectedAt: timestamp("connected_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [index("idx_email_connections_active").on(t.active)],
+);
+
+export const insertEmailConnectionSchema = createInsertSchema(emailConnections).omit({
+  id: true,
+  clientId: true,
+  connectedAt: true,
+});
+export type EmailConnection = typeof emailConnections.$inferSelect;
+export type InsertEmailConnection = z.infer<typeof insertEmailConnectionSchema>;
+
+// ── email_threads — one row per ingested buyer email ────────────────────
+// body/from stored plaintext (matches the repo's notes/buyer_company PII
+// boundary). Dedupe via the unique gmail_message_id index.
+export const emailThreads = pgTable(
+  "email_threads",
+  {
+    id: serial("id").primaryKey(),
+    clientId: uuid("client_id").notNull().references(() => ceramicClients.id),
+    leadId: integer("lead_id").references(() => ceramicLeads.id),
+    gmailThreadId: text("gmail_thread_id").notNull(),
+    gmailMessageId: text("gmail_message_id").notNull().unique(),
+    fromEmail: text("from_email"),
+    fromName: text("from_name"),
+    subject: text("subject"),
+    bodyText: text("body_text"),
+    sourcePlatform: text("source_platform"), // alibaba | indiamart | tradeindia | direct | website
+    language: text("language"), // ISO code
+    generatedReply: text("generated_reply"),
+    status: text("status").default("pending_approval").notNull(), // pending_approval (only value this slice)
+    receivedAt: timestamp("received_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [
+    index("idx_email_threads_client_id").on(t.clientId),
+    index("idx_email_threads_client_status").on(t.clientId, t.status),
+  ],
+);
+
+export const insertEmailThreadSchema = createInsertSchema(emailThreads).omit({
+  id: true,
+  clientId: true,
+  receivedAt: true,
+});
+export type EmailThread = typeof emailThreads.$inferSelect;
+export type InsertEmailThread = z.infer<typeof insertEmailThreadSchema>;
