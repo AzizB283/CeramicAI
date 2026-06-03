@@ -6,6 +6,7 @@ import { buildApp } from "./app";
 import { ensureDemoClient, seedAdminUsers } from "./seed";
 import { runMigrations } from "./db";
 import { startKeepAlive } from "./services/keepAlive";
+import { startEmailScheduler } from "./services/emailScheduler";
 
 const PORT = Number(process.env.PORT ?? 5000);
 
@@ -32,6 +33,9 @@ async function main() {
     if (process.env.NODE_ENV === "production") {
       startKeepAlive(PORT);
     }
+    // Poll connected Gmail inboxes every 5 min. No-ops (with a logged warning)
+    // when Google OAuth isn't configured, so dev without creds stays quiet.
+    startEmailScheduler();
   });
 }
 
