@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { pool } from "./db";
 import { runWithClient } from "./middleware/tenant";
 import { storage } from "./storage";
+import { ensureDemoClient } from "./seed";
 import type { CeramicClient } from "@shared/schema";
 
 let client: CeramicClient;
@@ -190,5 +191,50 @@ describe("cross-tenant isolation (multi mode)", () => {
   it("getLeads excludes another tenant's rows", async () => {
     const leads = await runWithClient(clientA.id, () => storage.getLeads());
     expect(leads.some((l) => l.id === bLead.id)).toBe(false);
+  });
+});
+
+describe("email connections + threads", () => {
+  it("upserts a connection and reads it back with tokens decrypted", async () => {
+    const clientId = await ensureDemoClient();
+    await runWithClient(clientId, async () => {
+      await storage.upsertEmailConnection({
+        gmailAddress: "exporter@example.com",
+        accessToken: "access-abc",
+        refreshToken: "refresh-xyz",
+        tokenExpiry: new Date(Date.now() + 3_600_000),
+        historyId: "1000",
+      });
+      const conn = await storage.getEmailConnection();
+      expect(conn?.gmailAddress).toBe("exporter@example.com");
+      expect(conn?.refreshToken).toBe("refresh-xyz"); // decrypted on read
+    });
+  });
+
+  it("inserts a thread and lists it scoped to the client", async () => {
+    const clientId = await ensureDemoClient();
+    await runWithClient(clientId, async () => {
+      const t = await storage.createEmailThread({
+        leadId: null,
+        gmailThreadId: "T1",
+        gmailMessageId: `M-${Date.now()}`,
+        fromEmail: "buyer@x.com",
+        fromName: "Buyer",
+        subject: "GVT 600x600",
+        bodyText: "need 3 containers",
+        sourcePlatform: "direct",
+        language: "en",
+        generatedReply: "Dear Buyer…",
+        status: "pending_approval",
+      });
+      const list = await storage.getEmailThreads();
+      expect(list.find((r) => r.id === t.id)).toBeTruthy();
+    });
+  });
+
+  it("listEmailConnectedClients returns the demo client cross-tenant", async () => {
+    const clientId = await ensureDemoClient();
+    const ids = await storage.listEmailConnectedClients();
+    expect(ids).toContain(clientId);
   });
 });
