@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { Copy, MessageCircle, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Copy, MessageCircle, CheckCircle2, AlertTriangle, Mail, RefreshCw, Unplug } from "lucide-react";
 
 /**
  * Per-factory WhatsApp Business Cloud API setup.
@@ -109,6 +109,7 @@ export default function AdminIntegrations() {
           <p className="text-muted-foreground">Connect external services like WhatsApp Business</p>
         </div>
         <Skeleton className="h-64 w-full" />
+        <GmailCard />
       </div>
     );
   }
@@ -278,6 +279,171 @@ export default function AdminIntegrations() {
           )}
         </CardContent>
       </Card>
+
+      <GmailCard />
     </div>
+  );
+}
+
+interface GmailStatus {
+  connected: boolean;
+  gmailAddress: string | null;
+  lastCheckedAt: string | null;
+}
+
+function formatLastChecked(iso: string | null) {
+  if (!iso) return "never";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "never";
+  return d.toLocaleString();
+}
+
+/**
+ * Per-factory Gmail inbox connection (Slice 1 — read + ingest + draft).
+ *
+ * When connected we poll the factory's Gmail for buyer inquiries, ingest
+ * them into the Email Inbox, and draft a reply. Sending is a later slice.
+ * "Connect Gmail" kicks off the OAuth flow; the callback redirects back to
+ * this page with ?gmail=connected | ?gmail=error.
+ */
+function GmailCard() {
+  const { toast } = useToast();
+  const { data: status, isLoading } = useQuery<GmailStatus>({
+    queryKey: ["/api/admin/email/status"],
+  });
+
+  // Surface the OAuth callback outcome (the provider redirects back here with
+  // ?gmail=connected | ?gmail=error), then strip the param so a refresh
+  // doesn't re-toast.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get("gmail");
+    if (!result) return;
+    if (result === "connected") {
+      toast({ title: "Gmail connected" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/email/status"] });
+    } else if (result === "error") {
+      toast({
+        title: "Gmail connection failed",
+        description: "Please try connecting again.",
+        variant: "destructive",
+      });
+    }
+    params.delete("gmail");
+    const query = params.toString();
+    const next = window.location.pathname + (query ? `?${query}` : "");
+    window.history.replaceState({}, "", next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const connectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/email/connect");
+      return res.json() as Promise<{ authUrl: string }>;
+    },
+    onSuccess: ({ authUrl }) => {
+      window.location.href = authUrl;
+    },
+    onError: (err: Error) =>
+      toast({ title: "Could not start Gmail connect", description: err.message, variant: "destructive" }),
+  });
+
+  const pollMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/admin/email/poll", {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/email/threads"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/email/status"] });
+      toast({ title: "Checked inbox" });
+    },
+    onError: (err: Error) =>
+      toast({ title: "Check failed", description: err.message, variant: "destructive" }),
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: () => apiRequest("DELETE", "/api/admin/email/disconnect"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/email/status"] });
+      toast({ title: "Gmail disconnected" });
+    },
+    onError: (err: Error) =>
+      toast({ title: "Disconnect failed", description: err.message, variant: "destructive" }),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-full bg-coral/10 text-coral-dark">
+              <Mail className="h-5 w-5" />
+            </div>
+            <div>
+              <CardTitle>Gmail Inbox</CardTitle>
+              <CardDescription>
+                Detect buyer inquiries in your Gmail and draft replies automatically.
+              </CardDescription>
+            </div>
+          </div>
+          {status?.connected ? (
+            <Badge className="bg-green-500/15 text-green-700 border-green-500/30">
+              <CheckCircle2 className="h-3 w-3 mr-1" /> Connected
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-muted-foreground">
+              Not connected
+            </Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <Skeleton className="h-10 w-48" />
+        ) : status?.connected ? (
+          <>
+            <div className="space-y-1 text-sm">
+              <div>
+                Connected as{" "}
+                <span className="font-medium">{status.gmailAddress ?? "Gmail"}</span>{" "}
+                <CheckCircle2 className="inline h-3.5 w-3.5 text-green-600" />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Last checked: {formatLastChecked(status.lastCheckedAt)}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                onClick={() => pollMutation.mutate()}
+                disabled={pollMutation.isPending}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${pollMutation.isPending ? "animate-spin" : ""}`} />
+                {pollMutation.isPending ? "Checking…" : "Check now"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => disconnectMutation.mutate()}
+                disabled={disconnectMutation.isPending}
+              >
+                <Unplug className="h-4 w-4 mr-2" />
+                {disconnectMutation.isPending ? "Disconnecting…" : "Disconnect"}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Connect the Gmail account where buyers email you (Alibaba, IndiaMART, TradeIndia,
+              or direct). New inquiries appear in the Email Inbox with a drafted reply.
+            </p>
+            <Button
+              onClick={() => connectMutation.mutate()}
+              disabled={connectMutation.isPending}
+            >
+              <Mail className="h-4 w-4 mr-2" />
+              {connectMutation.isPending ? "Connecting…" : "Connect Gmail"}
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
