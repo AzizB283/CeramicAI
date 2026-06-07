@@ -7,15 +7,57 @@ import { storage } from "../storage";
 import { notifyNewLead } from "./leadNotification";
 import { pickCatalogue } from "./catalogueMatcher";
 import { classifyAndExtract, generateReply, type BuyerEmailData } from "./emailProcessor";
+import { triageReply } from "./campaignContent";
 import type { ParsedEmail } from "./gmailPoller";
 import type { CeramicClient } from "@shared/schema";
 import type { LeadDraft, Mode } from "@shared/types";
 
+/**
+ * If this inbound email is a reply to an outbound campaign (sender matches an
+ * open campaign recipient), attribute + triage it: classify the intent, record
+ * it on the recipient, and stop the sequence (status → replied/unsubscribed).
+ * Returns the classified intent so the caller can escalate a sample request to
+ * a priority lead. No-ops (returns null) when the sender isn't a campaign
+ * recipient. Never throws — campaign attribution must not break inbound ingest.
+ */
+async function attributeCampaignReply(parsed: ParsedEmail): Promise<string | null> {
+  try {
+    if (!parsed.fromEmail) return null;
+    const recipient = await storage.findOpenRecipientByContactEmail(parsed.fromEmail);
+    if (!recipient) return null;
+
+    const intent = await triageReply(`${parsed.subject ?? ""}\n\n${parsed.bodyText ?? ""}`);
+    const status = intent === "unsubscribe" ? "unsubscribed" : "replied";
+    await storage.updateCampaignRecipient(recipient.id, {
+      status,
+      replyIntent: intent,
+      repliedAt: new Date(),
+    });
+    // An unsubscribe via reply also belongs on the suppression list.
+    if (intent === "unsubscribe") {
+      await storage.suppressContact({ email: parsed.fromEmail, reason: "unsubscribe" });
+      const contact = await storage.getContact(recipient.contactId);
+      if (contact && !contact.optedOut) await storage.updateContact(contact.id, { optedOut: true });
+    }
+    return intent;
+  } catch (err) {
+    console.warn("[emailIngest] campaign reply attribution failed:", err);
+    return null;
+  }
+}
+
 export async function ingestParsedEmail(parsed: ParsedEmail, clientConfig: CeramicClient): Promise<void> {
+  // Campaign-reply attribution runs first so the sequence auto-stops even if the
+  // message isn't classified as a fresh buyer inquiry below.
+  const campaignIntent = await attributeCampaignReply(parsed);
   const data: BuyerEmailData = await classifyAndExtract(
     `From: ${parsed.fromName ?? ""} <${parsed.fromEmail ?? ""}>\nSubject: ${parsed.subject ?? ""}\n\n${parsed.bodyText ?? ""}`,
   );
-  if (!data.is_buyer_inquiry) return; // not a buyer — skip silently
+  // Skip non-buyer emails — UNLESS this is a campaign reply asking for samples
+  // or clearly interested. A short "yes, send samples" may not look like a
+  // classic inquiry, but it's our highest-value outcome and must become a lead.
+  const campaignEscalation = campaignIntent === "sample_request" || campaignIntent === "hot";
+  if (!data.is_buyer_inquiry && !campaignEscalation) return;
 
   const catalogUrl = await resolveCatalogUrl(clientConfig, data);
   const generatedReply = await generateReply(data, clientConfig, catalogUrl);
@@ -41,7 +83,11 @@ export async function ingestParsedEmail(parsed: ParsedEmail, clientConfig: Ceram
     return;
   }
 
-  const isPriority = (data.buyer_type ?? "").toLowerCase() === "distributor";
+  // A campaign reply asking for samples (or clearly hot) is the north-star
+  // outcome — force it to a priority lead so the owner alert fires loud, even
+  // if the buyer-type wouldn't otherwise mark it priority.
+  const campaignPriority = campaignIntent === "sample_request" || campaignIntent === "hot";
+  const isPriority = campaignPriority || (data.buyer_type ?? "").toLowerCase() === "distributor";
   const lead = await storage.createLead({
     sessionId: `email_${parsed.gmailMessageId}`,
     channel: "email",
@@ -58,7 +104,7 @@ export async function ingestParsedEmail(parsed: ParsedEmail, clientConfig: Ceram
     quantity: data.quantity ?? null,
     incoterms: data.incoterms ?? null,
     destinationPort: data.destination_port ?? null,
-    sampleRequested: Boolean(data.sample_requested),
+    sampleRequested: Boolean(data.sample_requested) || campaignIntent === "sample_request",
     isDistributorInquiry: isPriority,
     priority: isPriority ? "priority" : "normal",
     status: "new",

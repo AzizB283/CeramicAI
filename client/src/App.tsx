@@ -16,6 +16,8 @@ import LoginPage from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminLeads from "@/pages/admin/leads";
+import AdminContacts from "@/pages/admin/contacts";
+import AdminCampaigns from "@/pages/admin/campaigns";
 import AdminEmailInbox from "@/pages/admin/email-inbox";
 import AdminProducts from "@/pages/admin/products";
 import AdminCatalogues from "@/pages/admin/catalogues";
@@ -112,6 +114,20 @@ function Router() {
         <ProtectedRoute>
           <AdminLayout>
             <AdminLeads />
+          </AdminLayout>
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/contacts">
+        <ProtectedRoute>
+          <AdminLayout>
+            <AdminContacts />
+          </AdminLayout>
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/campaigns">
+        <ProtectedRoute>
+          <AdminLayout>
+            <AdminCampaigns />
           </AdminLayout>
         </ProtectedRoute>
       </Route>

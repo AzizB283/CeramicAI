@@ -146,3 +146,84 @@ export type StepId =
   | "x_dist_phone"
   | "x_dist_email"
   | "x_dist_done";
+
+// ── OUTBOUND MODULE types (shared client ↔ server) ──────────────────────
+// Plan: docs/superpowers/plans/2026-06-07-outbound-contacts-and-campaigns.md
+
+/** Where an imported/added contact came from. Mirrors ceramic_contacts.source. */
+export type ContactSource =
+  | "manual"
+  | "lead"
+  | "csv"
+  | "tradeshow"
+  | "indiamart"
+  | "alibaba"
+  | "tradeindia";
+
+/** Reason a contact is on the do-not-contact list. */
+export type SuppressionReason = "unsubscribe" | "bounce" | "manual" | "complaint";
+
+/**
+ * The canonical contact fields a CSV column can map onto. The import wizard
+ * maps each source column header to one of these (or ignores it).
+ */
+export type ContactField =
+  | "name"
+  | "email"
+  | "phone"
+  | "company"
+  | "country"
+  | "city"
+  | "buyerType"
+  | "tags"
+  | "notes";
+
+/** A column-mapping: source CSV header → canonical contact field (or null = ignore). */
+export type CsvColumnMap = Record<string, ContactField | null>;
+
+/** Known CSV export formats we ship presets for. "generic" = best-effort auto-map. */
+export type CsvPreset = "generic" | "indiamart" | "alibaba" | "tradeindia";
+
+/** One rejected CSV row, surfaced back to the user to fix and re-upload. */
+export interface CsvRowError {
+  row: number; // 1-based row number in the source file (excluding header)
+  reason: string;
+}
+
+/**
+ * A contact parsed from one CSV row (pre-persistence). The route turns this
+ * into an InsertCeramicContact after deduping. `tags` is already split.
+ */
+export interface InputContactDraft {
+  name?: string;
+  email?: string;
+  phone?: string;
+  company?: string;
+  country?: string;
+  city?: string;
+  buyerType?: string;
+  tags?: string[];
+  notes?: string;
+  source: string;
+}
+
+/** Result of importing a CSV (also persisted to ceramic_contact_imports). */
+export interface CsvImportResult {
+  preset: CsvPreset;
+  rowsTotal: number;
+  rowsImported: number;
+  rowsSkipped: number;
+  errors: CsvRowError[];
+}
+
+/**
+ * A saved audience filter (resolved live against ceramic_contacts, never
+ * materialised). All set fields are AND-ed; within tags, ANY tag matches.
+ * optedOut/suppressed contacts are always excluded at resolve time.
+ */
+export interface SegmentRule {
+  country?: string[];
+  buyerType?: string[];
+  source?: ContactSource[];
+  tags?: string[];
+}

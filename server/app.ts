@@ -3,10 +3,13 @@ import cors from "cors";
 import { chatRouter } from "./routes/chat";
 import { authRouter } from "./routes/auth";
 import { adminRouter } from "./routes/admin";
+import { contactsRouter } from "./routes/contacts";
+import { campaignsRouter } from "./routes/campaigns";
 import { emailRouter } from "./routes/email";
 import { superadminRouter } from "./routes/superadmin";
 import { publicRouter } from "./routes/public";
 import { whatsappRouter } from "./routes/whatsapp";
+import { storage } from "./storage";
 import { setupAuth } from "./auth";
 import { allowEmbedding } from "./middleware/embed-framing";
 import { serveStatic } from "./static";
@@ -19,6 +22,9 @@ export function buildApp() {
   // Meta's X-Hub-Signature-256 HMAC; other routes ignore the field.
   app.use(
     express.json({
+      // CSV contact imports POST the file contents as text in the JSON body
+      // (no multipart dependency), so allow a larger body than the 100kb default.
+      limit: "12mb",
       verify: (req, _res, buf) => {
         (req as Request & { rawBody?: Buffer }).rawBody = buf;
       },
@@ -46,12 +52,28 @@ export function buildApp() {
   // the trust boundary.
   app.use("/api/whatsapp", whatsappRouter);
 
+  // Tracked-link redirect for campaign catalogue links: /r/:token records the
+  // hit (catalogue-open signal) and 302s to the real URL. Public, no auth — the
+  // token is an unguessable random string. Mounted before the SPA fallback.
+  app.get("/r/:token", async (req: Request, res: Response) => {
+    try {
+      const token = String(req.params.token);
+      const link = await storage.recordTrackedLinkHit(token);
+      if (link?.targetUrl) return res.redirect(302, link.targetUrl);
+    } catch (err) {
+      console.error("[trackedLinks] redirect failed:", err);
+    }
+    return res.status(404).type("text/plain").send("Link not found");
+  });
+
   // API
+  app.use("/api/admin/campaigns", campaignsRouter);
   app.use("/api/chat", chatRouter);
   app.use("/api/auth", authRouter);
   // Mounted before the generic /api/admin router for readability; Express
   // matches the more specific /api/admin/email prefix regardless of order.
   app.use("/api/admin/email", emailRouter);
+  app.use("/api/admin/contacts", contactsRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api/superadmin", superadminRouter);
 

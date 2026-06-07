@@ -7,6 +7,7 @@ import { ensureDemoClient, seedAdminUsers } from "./seed";
 import { runMigrations } from "./db";
 import { startKeepAlive } from "./services/keepAlive";
 import { startEmailScheduler } from "./services/emailScheduler";
+import { startCampaignScheduler } from "./services/campaignScheduler";
 
 const PORT = Number(process.env.PORT ?? 5000);
 
@@ -36,6 +37,8 @@ async function main() {
     // Poll connected Gmail inboxes every 5 min. No-ops (with a logged warning)
     // when Google OAuth isn't configured, so dev without creds stays quiet.
     startEmailScheduler();
+    // Drip outbound campaign emails every 1 min (respects the daily Gmail cap).
+    startCampaignScheduler();
   });
 }
 

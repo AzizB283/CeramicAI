@@ -318,3 +318,315 @@ export const insertEmailThreadSchema = createInsertSchema(emailThreads).omit({
 });
 export type EmailThread = typeof emailThreads.$inferSelect;
 export type InsertEmailThread = z.infer<typeof insertEmailThreadSchema>;
+
+// ── OUTBOUND MODULE (Slice A: address book) ─────────────────────────────
+// Plan: docs/superpowers/plans/2026-06-07-outbound-contacts-and-campaigns.md
+//
+// ── ceramic_contacts — the outbound address book ────────────────────────
+// A first-class prospect list, SEPARATE from ceramic_leads. An imported
+// prospect (CSV / trade show / platform export) is not the same as a buyer
+// who chatted with the bot. Leads can be *promoted* into contacts (leadId set)
+// so inbound + outbound share one book. Buyer PII (name/email/phone) is
+// encrypted at rest exactly like ceramic_leads; emailHash/phoneHash are
+// peppered HMACs for dedupe + suppression matching without plaintext.
+export const ceramicContacts = pgTable(
+  "ceramic_contacts",
+  {
+    id: serial("id").primaryKey(),
+    clientId: uuid("client_id").notNull().references(() => ceramicClients.id),
+    name: text("name"), // encrypted v2:…
+    email: text("email"), // encrypted v2:…
+    emailHash: text("email_hash"), // HMAC for dedupe + suppression match
+    phone: text("phone"), // encrypted v2:…
+    phoneHash: text("phone_hash"), // HMAC for dedupe
+    company: text("company"), // business identity — plaintext (matches buyerCompany)
+    country: text("country"),
+    city: text("city"),
+    buyerType: text("buyer_type"), // retailer | distributor | architect | builder | export | general
+    source: text("source").default("manual").notNull(), // csv | lead | manual | tradeshow | indiamart | alibaba | tradeindia
+    tags: jsonb("tags").$type<string[]>().default([]).notNull(),
+    // Set when this contact was promoted from a bot lead. Lets us avoid
+    // double-importing someone who already chatted, and link back to history.
+    leadId: integer("lead_id").references(() => ceramicLeads.id),
+    optedOut: boolean("opted_out").default(false).notNull(),
+    lastContactedAt: timestamp("last_contacted_at"), // drives the dormant-buyer detector
+    notes: text("notes"),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [
+    index("idx_ceramic_contacts_client_id").on(t.clientId),
+    index("idx_ceramic_contacts_client_email_hash").on(t.clientId, t.emailHash),
+    index("idx_ceramic_contacts_client_phone_hash").on(t.clientId, t.phoneHash),
+    index("idx_ceramic_contacts_client_country").on(t.clientId, t.country),
+    index("idx_ceramic_contacts_client_buyer_type").on(t.clientId, t.buyerType),
+  ],
+);
+
+export const insertCeramicContactSchema = createInsertSchema(ceramicContacts)
+  .omit({
+    id: true,
+    clientId: true,
+    emailHash: true,
+    phoneHash: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  // tags has a DB default ([]), so callers may omit it.
+  .partial({ tags: true });
+export type CeramicContact = typeof ceramicContacts.$inferSelect;
+export type InsertCeramicContact = z.infer<typeof insertCeramicContactSchema>;
+
+// ── ceramic_contact_imports — audit trail of each CSV upload ────────────
+// One row per import so the UI can show history and offer "undo last import".
+// errorReport holds the per-row rejections (row number + reason) so the user
+// can fix and re-upload. Counts are denormalised for a cheap list view.
+export const ceramicContactImports = pgTable(
+  "ceramic_contact_imports",
+  {
+    id: serial("id").primaryKey(),
+    clientId: uuid("client_id").notNull().references(() => ceramicClients.id),
+    filename: text("filename"),
+    preset: text("preset"), // generic | indiamart | alibaba | tradeindia
+    rowsTotal: integer("rows_total").default(0).notNull(),
+    rowsImported: integer("rows_imported").default(0).notNull(),
+    rowsSkipped: integer("rows_skipped").default(0).notNull(),
+    errorReport: jsonb("error_report").$type<Array<{ row: number; reason: string }>>().default([]).notNull(),
+    importedBy: uuid("imported_by").references(() => adminUsers.id),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [index("idx_ceramic_contact_imports_client_id").on(t.clientId)],
+);
+
+export const insertCeramicContactImportSchema = createInsertSchema(ceramicContactImports).omit({
+  id: true,
+  clientId: true,
+  createdAt: true,
+});
+export type CeramicContactImport = typeof ceramicContactImports.$inferSelect;
+export type InsertCeramicContactImport = z.infer<typeof insertCeramicContactImportSchema>;
+
+// ── ceramic_suppressions — do-not-contact list ──────────────────────────
+// Protects the client's sending reputation: an unsubscribe, hard bounce, or
+// manual block writes a row here, and the campaign drip engine skips any
+// contact whose emailHash/phoneHash matches. Matched by hash (no plaintext).
+export const ceramicSuppressions = pgTable(
+  "ceramic_suppressions",
+  {
+    id: serial("id").primaryKey(),
+    clientId: uuid("client_id").notNull().references(() => ceramicClients.id),
+    emailHash: text("email_hash"),
+    phoneHash: text("phone_hash"),
+    reason: text("reason").notNull(), // unsubscribe | bounce | manual | complaint
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [
+    index("idx_ceramic_suppressions_client_id").on(t.clientId),
+    // One suppression per (client, email). A partial unique index would be
+    // ideal (email_hash NOT NULL) but Drizzle's portable uniqueIndex covers the
+    // common path; the storage layer also guards with onConflictDoNothing.
+    index("idx_ceramic_suppressions_client_email_hash").on(t.clientId, t.emailHash),
+    index("idx_ceramic_suppressions_client_phone_hash").on(t.clientId, t.phoneHash),
+  ],
+);
+
+export const insertCeramicSuppressionSchema = createInsertSchema(ceramicSuppressions).omit({
+  id: true,
+  clientId: true,
+  createdAt: true,
+});
+export type CeramicSuppression = typeof ceramicSuppressions.$inferSelect;
+export type InsertCeramicSuppression = z.infer<typeof insertCeramicSuppressionSchema>;
+
+// ── OUTBOUND MODULE (Slice B: segments + email campaigns) ───────────────
+// Plan: docs/superpowers/plans/2026-06-07-outbound-contacts-and-campaigns.md
+//
+// ── ceramic_segments — a saved, live-resolved audience filter ───────────
+// The `rule` is matched against ceramic_contacts at resolve time (not
+// materialised) so it stays fresh as contacts are added. Opted-out and
+// suppressed contacts are always excluded when resolved for a send.
+export const ceramicSegments = pgTable(
+  "ceramic_segments",
+  {
+    id: serial("id").primaryKey(),
+    clientId: uuid("client_id").notNull().references(() => ceramicClients.id),
+    name: text("name").notNull(),
+    // { country?: string[]; buyerType?: string[]; source?: string[]; tags?: string[] }
+    rule: jsonb("rule").$type<{
+      country?: string[];
+      buyerType?: string[];
+      source?: string[];
+      tags?: string[];
+    }>().default({}).notNull(),
+    // System-managed segments (e.g. the dormant-buyer "auto:winback") carry a
+    // kind so the UI can label them and the detector can find/refresh its row.
+    kind: text("kind").default("manual").notNull(), // manual | auto:winback
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [index("idx_ceramic_segments_client_id").on(t.clientId)],
+);
+
+export const insertCeramicSegmentSchema = createInsertSchema(ceramicSegments).omit({
+  id: true,
+  clientId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type CeramicSegment = typeof ceramicSegments.$inferSelect;
+export type InsertCeramicSegment = z.infer<typeof insertCeramicSegmentSchema>;
+
+// ── ceramic_campaigns — one outbound campaign (a sequence of steps) ──────
+// Subject/body/catalogue live on ceramic_campaign_steps; a one-shot blast is
+// a campaign with a single step. `stats` is a denormalised counter cache for
+// the report (so the list view is one row read, not an aggregate per render).
+export const ceramicCampaigns = pgTable(
+  "ceramic_campaigns",
+  {
+    id: serial("id").primaryKey(),
+    clientId: uuid("client_id").notNull().references(() => ceramicClients.id),
+    name: text("name").notNull(),
+    channel: text("channel").notNull().default("email"), // email | whatsapp (slice C)
+    segmentId: integer("segment_id").references(() => ceramicSegments.id),
+    aiPersonalize: boolean("ai_personalize").default(false).notNull(),
+    status: text("status").notNull().default("draft"), // draft | scheduled | sending | paused | done
+    scheduledAt: timestamp("scheduled_at"),
+    stats: jsonb("stats").$type<{
+      total?: number;
+      queued?: number;
+      sent?: number;
+      opened?: number;
+      replied?: number;
+      hot?: number;
+      sampleRequests?: number;
+      failed?: number;
+      unsubscribed?: number;
+    }>().default({}).notNull(),
+    startedAt: timestamp("started_at"),
+    completedAt: timestamp("completed_at"),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [
+    index("idx_ceramic_campaigns_client_id").on(t.clientId),
+    index("idx_ceramic_campaigns_client_status").on(t.clientId, t.status),
+  ],
+);
+
+export const insertCeramicCampaignSchema = createInsertSchema(ceramicCampaigns)
+  .omit({
+    id: true,
+    clientId: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  // stats has a DB default ({}), so callers may omit it.
+  .partial({ stats: true });
+export type CeramicCampaign = typeof ceramicCampaigns.$inferSelect;
+export type InsertCeramicCampaign = z.infer<typeof insertCeramicCampaignSchema>;
+
+// ── ceramic_campaign_steps — ordered touches in a campaign ──────────────
+// stepIndex 0 = first email; delayDays is the offset before THIS step fires
+// (0 for the first). Slice B ships single-step; the table is multi-step ready
+// so Slice B2 (sequences) needs no schema change. Plaintext business content.
+export const ceramicCampaignSteps = pgTable(
+  "ceramic_campaign_steps",
+  {
+    id: serial("id").primaryKey(),
+    clientId: uuid("client_id").notNull().references(() => ceramicClients.id),
+    campaignId: integer("campaign_id").notNull().references(() => ceramicCampaigns.id),
+    stepIndex: integer("step_index").notNull().default(0),
+    delayDays: integer("delay_days").notNull().default(0),
+    subject: text("subject").notNull(),
+    bodyTemplate: text("body_template").notNull(), // may contain {{name}} {{company}} {{catalogue}} tokens
+    catalogueId: integer("catalogue_id").references(() => ceramicCatalogues.id),
+    whatsappTemplateName: text("whatsapp_template_name"), // slice C
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [
+    index("idx_ceramic_campaign_steps_campaign").on(t.campaignId, t.stepIndex),
+    index("idx_ceramic_campaign_steps_client_id").on(t.clientId),
+  ],
+);
+
+export const insertCeramicCampaignStepSchema = createInsertSchema(ceramicCampaignSteps).omit({
+  id: true,
+  clientId: true,
+  createdAt: true,
+});
+export type CeramicCampaignStep = typeof ceramicCampaignSteps.$inferSelect;
+export type InsertCeramicCampaignStep = z.infer<typeof insertCeramicCampaignStepSchema>;
+
+// ── ceramic_campaign_recipients — one contact's run through a campaign ───
+// `status` lifecycle: queued → sending → sent (single-step done) | active
+// (sequence in progress) → replied | unsubscribed | bounced | failed. A reply
+// sets status='replied' so the drip skips it forever (auto-stop). replyIntent
+// is set by the LLM triage on the inbound reply.
+export const ceramicCampaignRecipients = pgTable(
+  "ceramic_campaign_recipients",
+  {
+    id: serial("id").primaryKey(),
+    clientId: uuid("client_id").notNull().references(() => ceramicClients.id),
+    campaignId: integer("campaign_id").notNull().references(() => ceramicCampaigns.id),
+    contactId: integer("contact_id").notNull().references(() => ceramicContacts.id),
+    currentStep: integer("current_step").notNull().default(0),
+    status: text("status").notNull().default("queued"), // queued|sending|sent|active|replied|bounced|unsubscribed|failed
+    replyIntent: text("reply_intent"), // sample_request|hot|lukewarm|not_now|wrong_person|unsubscribe
+    nextSendAt: timestamp("next_send_at"), // when the next step is due (sequences)
+    renderedSubject: text("rendered_subject"), // audit of the last send
+    renderedBody: text("rendered_body"),
+    gmailMessageId: text("gmail_message_id"),
+    gmailThreadId: text("gmail_thread_id"),
+    error: text("error"),
+    openedAt: timestamp("opened_at"), // first tracked-link hit
+    lastSentAt: timestamp("last_sent_at"),
+    repliedAt: timestamp("replied_at"),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [
+    index("idx_ceramic_campaign_recipients_campaign_status").on(t.campaignId, t.status),
+    index("idx_ceramic_campaign_recipients_client_id").on(t.clientId),
+    index("idx_ceramic_campaign_recipients_contact").on(t.contactId),
+    index("idx_ceramic_campaign_recipients_due").on(t.status, t.nextSendAt),
+  ],
+);
+
+export const insertCeramicCampaignRecipientSchema = createInsertSchema(ceramicCampaignRecipients).omit({
+  id: true,
+  clientId: true,
+  createdAt: true,
+});
+export type CeramicCampaignRecipient = typeof ceramicCampaignRecipients.$inferSelect;
+export type InsertCeramicCampaignRecipient = z.infer<typeof insertCeramicCampaignRecipientSchema>;
+
+// ── ceramic_tracked_links — redirect+count for catalogue-open signals ────
+// An outbound catalogue link is sent as /r/:token instead of the raw URL. A
+// hit increments hitCount and 302s to targetUrl; ≥1 hit is the open signal.
+export const ceramicTrackedLinks = pgTable(
+  "ceramic_tracked_links",
+  {
+    id: serial("id").primaryKey(),
+    clientId: uuid("client_id").notNull().references(() => ceramicClients.id),
+    token: text("token").notNull().unique(), // URL-safe random; the public id in /r/:token
+    targetUrl: text("target_url").notNull(),
+    campaignId: integer("campaign_id").references(() => ceramicCampaigns.id),
+    recipientId: integer("recipient_id").references(() => ceramicCampaignRecipients.id),
+    catalogueId: integer("catalogue_id").references(() => ceramicCatalogues.id),
+    hitCount: integer("hit_count").default(0).notNull(),
+    firstHitAt: timestamp("first_hit_at"),
+    lastHitAt: timestamp("last_hit_at"),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (t) => [
+    index("idx_ceramic_tracked_links_client_id").on(t.clientId),
+    index("idx_ceramic_tracked_links_recipient").on(t.recipientId),
+  ],
+);
+
+export const insertCeramicTrackedLinkSchema = createInsertSchema(ceramicTrackedLinks).omit({
+  id: true,
+  clientId: true,
+  createdAt: true,
+});
+export type CeramicTrackedLink = typeof ceramicTrackedLinks.$inferSelect;
+export type InsertCeramicTrackedLink = z.infer<typeof insertCeramicTrackedLinkSchema>;

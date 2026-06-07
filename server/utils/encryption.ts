@@ -98,3 +98,21 @@ export function normalizePhone(phone: string): string {
 export function hashPhone(phone: string): string {
   return crypto.createHmac("sha256", phonePepperLazy()).update(normalizePhone(phone)).digest("hex");
 }
+
+// Deterministic peppered HMAC for indexed lookup of an encrypted email — used
+// to dedupe imported contacts and to match the suppression list without ever
+// storing the address in plaintext. Separate pepper purpose from phone so the
+// two hash spaces can't be cross-correlated.
+let emailPepper: Buffer | null = null;
+function emailPepperLazy(): Buffer {
+  if (!emailPepper) emailPepper = getHmacPepper("email");
+  return emailPepper;
+}
+
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function hashEmail(email: string): string {
+  return crypto.createHmac("sha256", emailPepperLazy()).update(normalizeEmail(email)).digest("hex");
+}
