@@ -119,7 +119,8 @@ export async function generateReply(
 Rules: reply in language "${data.language}"; warm, concise, under 150 words; always include the catalogue link ${catalogUrl};
 say a formal quotation will follow within 4 hours; ask for any missing size/quantity/finish; do NOT quote prices;
 if distributor inquiry, say the director will call within 24 hours; sign off "Best regards, ${clientConfig.ownerName || "Export Team"}, ${clientConfig.name}".
-Buyer: country=${data.buyer_country}, product=${data.product_category} ${data.product_size} ${data.product_finish}, qty=${data.quantity}, incoterms=${data.incoterms}, port=${data.destination_port}.`,
+Address the buyer by their name if one is given below. NEVER write a placeholder like "[Buyer's Name]" — if no name is given, open with "Dear Sir/Madam".
+Buyer: name=${data.buyer_name ?? "unknown"}, company=${data.buyer_company ?? "unknown"}, country=${data.buyer_country}, product=${data.product_category} ${data.product_size} ${data.product_finish}, qty=${data.quantity}, incoterms=${data.incoterms}, port=${data.destination_port}.`,
         },
         { role: "user", content: "Generate the reply email body only. No subject line." },
       ],

@@ -1,9 +1,12 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
   DialogContent,
@@ -11,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Inbox, Mail } from "lucide-react";
+import { Inbox, Mail, Send, Paperclip, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface EmailThread {
@@ -27,8 +30,10 @@ interface EmailThread {
   sourcePlatform: string | null; // "alibaba" | "indiamart" | "tradeindia" | "direct" | "website"
   language: string | null;
   generatedReply: string | null;
-  status: string; // "pending_approval" this slice
+  sentReply: string | null;
+  status: string; // "pending_approval" | "sent"
   receivedAt: string;
+  sentAt: string | null;
 }
 
 // Per-platform badge tint. Falls back to a neutral grey for unknown sources.
@@ -78,6 +83,7 @@ function fromLine(thread: EmailThread) {
 }
 
 export default function AdminEmailInbox() {
+  const { toast } = useToast();
   const { data: threads, isLoading } = useQuery<EmailThread[]>({
     queryKey: ["/api/admin/email/threads"],
   });
@@ -86,6 +92,31 @@ export default function AdminEmailInbox() {
   // The list row already carries every field, so we show the selected thread
   // straight from the loaded list rather than firing a second detail request.
   const selected = threads?.find((t) => t.id === selectedId) ?? null;
+
+  // Editable draft, seeded from the selected thread. Once sent, we show the
+  // sent body instead and lock editing.
+  const [draft, setDraft] = useState("");
+  const isSent = selected?.status === "sent";
+  useEffect(() => {
+    if (!selected) return;
+    setDraft(selected.sentReply ?? selected.generatedReply ?? "");
+  }, [selectedId, selected?.sentReply, selected?.generatedReply]);
+
+  const sendMutation = useMutation({
+    mutationFn: async (vars: { id: number; body: string }) => {
+      const res = await apiRequest("POST", `/api/admin/email/threads/${vars.id}/send`, {
+        body: vars.body,
+      });
+      return res.json() as Promise<EmailThread>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/email/threads"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/leads"] });
+      toast({ title: "Reply sent" });
+    },
+    onError: (err: Error) =>
+      toast({ title: "Send failed", description: err.message, variant: "destructive" }),
+  });
 
   if (isLoading) {
     return (
@@ -142,9 +173,16 @@ export default function AdminEmailInbox() {
                   >
                     {platformLabel(thread.sourcePlatform)}
                   </Badge>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {timeAgo(thread.receivedAt)}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {thread.status === "sent" && (
+                      <Badge className="border-transparent bg-green-100 text-green-700 hover:bg-green-100">
+                        <CheckCircle2 className="mr-1 h-3 w-3" /> Sent
+                      </Badge>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      {timeAgo(thread.receivedAt)}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-2 text-sm font-medium">
                   {thread.fromName || thread.fromEmail || "Unknown sender"}
@@ -214,19 +252,64 @@ export default function AdminEmailInbox() {
                   </div>
                 </div>
 
-                {/* Generated reply */}
+                {/* Reply — editable until sent */}
                 <div className="space-y-2">
-                  <div className="text-sm font-semibold">Generated reply</div>
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold">
+                      {isSent ? "Sent reply" : "Reply"}
+                    </div>
+                    {isSent && selected.sentAt && (
+                      <span className="flex items-center gap-1 text-xs text-green-700">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Sent {timeAgo(selected.sentAt)}
+                      </span>
+                    )}
+                  </div>
                   <Textarea
-                    readOnly
-                    value={selected.generatedReply ?? ""}
-                    rows={8}
-                    className="resize-none bg-muted/30"
-                    placeholder="No reply generated yet."
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    readOnly={isSent}
+                    rows={10}
+                    className={cn("resize-y", isSent && "bg-muted/30")}
+                    placeholder="No reply generated yet — write one here."
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Sending will be enabled in the next update.
-                  </p>
+
+                  {!isSent && (
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                      {/* Attach is the next slice — visible but disabled so the
+                          UI shape is in place. */}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled
+                        title="Attachments coming soon"
+                      >
+                        <Paperclip className="mr-2 h-4 w-4" />
+                        Attach
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => sendMutation.mutate({ id: selected.id, body: draft })}
+                        disabled={sendMutation.isPending || !draft.trim() || !selected.fromEmail}
+                      >
+                        <Send className="mr-2 h-4 w-4" />
+                        {sendMutation.isPending ? "Sending…" : "Send reply"}
+                      </Button>
+                    </div>
+                  )}
+
+                  {!isSent && !selected.fromEmail && (
+                    <p className="text-xs text-destructive">
+                      No sender address on this email — can't send a reply.
+                    </p>
+                  )}
+                  {!isSent && (
+                    <p className="text-xs text-muted-foreground">
+                      Edit the draft above before sending. The reply goes to{" "}
+                      {selected.fromEmail ?? "the buyer"} on your connected Gmail, in the same thread.
+                    </p>
+                  )}
                 </div>
               </div>
             </>

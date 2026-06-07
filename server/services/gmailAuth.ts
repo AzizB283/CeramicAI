@@ -71,6 +71,56 @@ export function gmailClientFromRefreshToken(refreshToken: string) {
   return google.gmail({ version: "v1", auth: oauth2Client });
 }
 
+/** Encode a UTF-8 subject as an RFC 2047 word so non-ASCII survives transit. */
+function encodeSubject(subject: string): string {
+  // eslint-disable-next-line no-control-regex
+  if (/^[\x00-\x7F]*$/.test(subject)) return subject;
+  return `=?UTF-8?B?${Buffer.from(subject, "utf8").toString("base64")}?=`;
+}
+
+export interface SendReplyInput {
+  refreshToken: string;
+  to: string;
+  subject: string;
+  bodyText: string;
+  /**
+   * Gmail thread to attach the reply to. Passing threadId to messages.send is
+   * what keeps the reply in the same conversation — Gmail handles the
+   * In-Reply-To/References linkage internally, so we don't need the original
+   * RFC Message-ID (which we don't store).
+   */
+  gmailThreadId: string;
+}
+
+/**
+ * Send a plain-text reply on the connected Gmail, threaded onto the buyer's
+ * original message. Returns the sent message id. Attachments are a later slice
+ * — this builds a simple text/plain RFC 2822 message.
+ */
+export async function sendGmailReply(input: SendReplyInput): Promise<string> {
+  const gmail = gmailClientFromRefreshToken(input.refreshToken);
+
+  const headers = [
+    `To: ${input.to}`,
+    `Subject: ${encodeSubject(input.subject)}`,
+    "MIME-Version: 1.0",
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: 8bit",
+  ];
+  const raw = `${headers.join("\r\n")}\r\n\r\n${input.bodyText}`;
+  const encoded = Buffer.from(raw, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const res = await gmail.users.messages.send({
+    userId: "me",
+    requestBody: { raw: encoded, threadId: input.gmailThreadId },
+  });
+  return res.data.id ?? "";
+}
+
 export async function revokeAccess(refreshToken: string): Promise<void> {
   const oauth2Client = createOAuth2Client();
   oauth2Client.setCredentials({ refresh_token: refreshToken });

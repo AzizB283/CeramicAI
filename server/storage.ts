@@ -311,6 +311,16 @@ export const storage = {
       .where(and(eq(emailThreads.id, threadId), scope(emailThreads.clientId)));
   },
 
+  async markThreadSent(threadId: number, sentReply: string): Promise<EmailThread> {
+    const [row] = await db
+      .update(emailThreads)
+      .set({ status: "sent", sentReply, sentAt: new Date() })
+      .where(and(eq(emailThreads.id, threadId), scope(emailThreads.clientId)))
+      .returning();
+    if (!row) throw new Error(`Email thread ${threadId} not found in current tenant`);
+    return row;
+  },
+
   // catalogues — per-factory PDF / Drive URLs the bot serves to buyers
   async createCatalogue(input: InsertCeramicCatalogue): Promise<CeramicCatalogue> {
     const [row] = await db

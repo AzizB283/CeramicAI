@@ -10,6 +10,7 @@ import {
   exchangeCodeForTokens,
   getGmailAddress,
   revokeAccess,
+  sendGmailReply,
 } from "../services/gmailAuth";
 import { pollClient } from "../services/gmailPoller";
 
@@ -133,6 +134,63 @@ emailRouter.get("/threads/:id", async (req, res) => {
     return;
   }
   res.json(thread);
+});
+
+// POST /threads/:id/send → send the (possibly edited) reply via Gmail, threaded
+// onto the buyer's original message, then mark the thread sent + lead contacted.
+emailRouter.post("/threads/:id/send", async (req, res) => {
+  const clientId = resolveClient(req, res);
+  if (!clientId) return;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "bad id" });
+    return;
+  }
+  const body = typeof req.body?.body === "string" ? req.body.body.trim() : "";
+  if (!body) {
+    res.status(400).json({ error: "Reply body is empty." });
+    return;
+  }
+
+  try {
+    const result = await runWithClient(clientId, async () => {
+      const thread = await storage.getEmailThread(id);
+      if (!thread) return { error: "not found" as const };
+      if (thread.status === "sent") return { error: "already sent" as const };
+      if (!thread.fromEmail) return { error: "no recipient" as const };
+
+      const conn = await storage.getEmailConnection();
+      if (!conn || !conn.active) return { error: "gmail not connected" as const };
+
+      const subject = thread.subject?.toLowerCase().startsWith("re:")
+        ? thread.subject
+        : `Re: ${thread.subject ?? "your inquiry"}`;
+
+      await sendGmailReply({
+        refreshToken: conn.refreshToken,
+        to: thread.fromEmail,
+        subject,
+        bodyText: body,
+        gmailThreadId: thread.gmailThreadId,
+      });
+
+      const updated = await storage.markThreadSent(id, body);
+      if (thread.leadId) {
+        await storage.updateLead(thread.leadId, { status: "contacted" });
+      }
+      return { thread: updated };
+    });
+
+    if ("error" in result) {
+      const status = result.error === "not found" ? 404 : 409;
+      res.status(status).json({ error: result.error });
+      return;
+    }
+    res.json(result.thread);
+  } catch (err) {
+    console.error("[email/send] failed:", err);
+    res.status(502).json({ error: "Send failed. Check the Gmail connection and try again." });
+  }
 });
 
 // POST /poll → manual "check now"

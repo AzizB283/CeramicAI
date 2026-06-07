@@ -1,7 +1,13 @@
 /**
- * Incremental Gmail inbox sync for one connected client. Uses the History API
- * so we only fetch messages added since the saved historyId. First poll (no
- * cursor) seeds the cursor from the current mailbox WITHOUT backfilling.
+ * Gmail inbox sync for one connected client.
+ *
+ * We poll with messages.list (query "in:inbox newer_than:Nd") rather than the
+ * History API. The History API seeded from getProfile().historyId proved
+ * unreliable — newly-arrived messages were skipped because the profile
+ * historyId doesn't line up with the message-event history. messages.list is
+ * the robust choice for a low-volume bot polling every few minutes: we re-scan
+ * a small recent window each poll and rely on the unique gmail_message_id
+ * constraint (handled in emailIngest) to skip anything already ingested.
  */
 import { storage } from "../storage";
 import { gmailClientFromRefreshToken } from "./gmailAuth";
@@ -93,6 +99,11 @@ export function parseGmailMessage(msg: any): ParsedEmail {
   };
 }
 
+// How far back each poll scans. The scheduler runs every 5 min, so a 1-day
+// window comfortably covers downtime/restarts while keeping the scan small.
+// Dedup by gmail_message_id means re-scanning the same window is harmless.
+const POLL_WINDOW = "newer_than:1d in:inbox";
+
 /** Poll one client's inbox. MUST be called inside runWithClient(clientId, …). */
 export async function pollClient(clientConfig: CeramicClient): Promise<void> {
   const conn = await storage.getEmailConnection();
@@ -100,43 +111,34 @@ export async function pollClient(clientConfig: CeramicClient): Promise<void> {
 
   const gmail = gmailClientFromRefreshToken(conn.refreshToken);
 
-  // First-ever poll: seed the cursor from the current mailbox, don't backfill.
-  if (!conn.historyId) {
-    const profile = await gmail.users.getProfile({ userId: "me" });
-    await storage.updateEmailConnectionSync({
-      historyId: profile.data.historyId ? String(profile.data.historyId) : null,
-      lastCheckedAt: new Date(),
-    });
-    return;
-  }
-
-  const history = await gmail.users.history.list({
+  const list = await gmail.users.messages.list({
     userId: "me",
-    startHistoryId: conn.historyId,
-    historyTypes: ["messageAdded"],
-    labelId: "INBOX",
+    q: POLL_WINDOW,
+    maxResults: 50,
   });
 
-  const messageIds = new Set<string>();
-  for (const h of history.data.history ?? []) {
-    for (const added of h.messagesAdded ?? []) {
-      const id = added.message?.id;
-      if (id) messageIds.add(id);
-    }
-  }
+  // Oldest-first so threads/leads land in chronological order. messages.list
+  // returns newest-first, so reverse.
+  const ids = (list.data.messages ?? []).map((m) => m.id).filter((id): id is string => !!id);
+  ids.reverse();
 
-  for (const id of messageIds) {
+  let ingested = 0;
+  for (const id of ids) {
     try {
       const full = await gmail.users.messages.get({ userId: "me", id, format: "full" });
       const parsed = parseGmailMessage(full.data);
+      // ingestParsedEmail is idempotent: a duplicate gmail_message_id is caught
+      // and skipped, so re-scanning the window every poll is safe.
       await ingestParsedEmail(parsed, clientConfig);
+      ingested++;
     } catch (err) {
       console.error(`[gmailPoller] message ${id} failed:`, err);
     }
   }
 
-  await storage.updateEmailConnectionSync({
-    historyId: history.data.historyId ? String(history.data.historyId) : conn.historyId,
-    lastCheckedAt: new Date(),
-  });
+  console.log(
+    `[gmailPoller] ${conn.gmailAddress}: scanned ${ids.length} message(s) in window`,
+  );
+
+  await storage.updateEmailConnectionSync({ lastCheckedAt: new Date() });
 }

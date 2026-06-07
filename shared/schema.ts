@@ -300,8 +300,10 @@ export const emailThreads = pgTable(
     sourcePlatform: text("source_platform"), // alibaba | indiamart | tradeindia | direct | website
     language: text("language"), // ISO code
     generatedReply: text("generated_reply"),
-    status: text("status").default("pending_approval").notNull(), // pending_approval (only value this slice)
+    sentReply: text("sent_reply"), // the final (possibly edited) body actually sent
+    status: text("status").default("pending_approval").notNull(), // pending_approval | sent
     receivedAt: timestamp("received_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    sentAt: timestamp("sent_at"),
   },
   (t) => [
     index("idx_email_threads_client_id").on(t.clientId),

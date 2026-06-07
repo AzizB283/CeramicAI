@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "concurrently --names \"api,web\" --prefix-colors \"cyan,magenta\" --kill-others-on-fail \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "npm run dev --workspace client",
-    "dev:server": "CHOKIDAR_USEPOLLING=true tsx watch --env-file-if-exists=.env --env-file-if-exists=.env.local --tsconfig server/tsconfig.json server/index.ts",
+    "dev:server": "cross-env CHOKIDAR_USEPOLLING=true tsx watch --env-file-if-exists=.env --env-file-if-exists=.env.local --tsconfig server/tsconfig.json server/index.ts",
     "build": "tsx script/build.ts",
     "build:client": "npm run build --workspace client",
     "start": "NODE_ENV=production node dist/server.cjs",
@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
     "dotenv": "^17.3.1",
     "drizzle-kit": "^0.31.8",
     "drizzle-orm": "^0.39.3",
