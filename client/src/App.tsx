@@ -16,6 +16,7 @@ import LoginPage from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminLeads from "@/pages/admin/leads";
+import AdminEmailInbox from "@/pages/admin/email-inbox";
 import AdminProducts from "@/pages/admin/products";
 import AdminCatalogues from "@/pages/admin/catalogues";
 import AdminChatWidget from "@/pages/admin/chat-widget";
@@ -111,6 +112,13 @@ function Router() {
         <ProtectedRoute>
           <AdminLayout>
             <AdminLeads />
+          </AdminLayout>
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/email-inbox">
+        <ProtectedRoute>
+          <AdminLayout>
+            <AdminEmailInbox />
           </AdminLayout>
         </ProtectedRoute>
       </Route>

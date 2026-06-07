@@ -9,6 +9,8 @@ import {
   ceramicProducts,
   adminUsers,
   superadminActions,
+  emailConnections,
+  emailThreads,
   type CeramicClient,
   type InsertCeramicClient,
   type CeramicLead,
@@ -22,6 +24,10 @@ import {
   type AdminUser,
   type InsertAdminUser,
   type InsertSuperadminAction,
+  type EmailConnection,
+  type InsertEmailConnection,
+  type EmailThread,
+  type InsertEmailThread,
 } from "@shared/schema";
 import { encrypt, decrypt, isEncrypted, hashPhone } from "./utils/encryption";
 
@@ -82,6 +88,14 @@ function decryptLead(row: CeramicLead): CeramicLead {
     buyerName: safeDecrypt(row.buyerName),
     buyerPhone: safeDecrypt(row.buyerPhone),
     buyerEmail: safeDecrypt(row.buyerEmail),
+  };
+}
+
+function decryptConnection(row: EmailConnection): EmailConnection {
+  return {
+    ...row,
+    accessToken: safeDecrypt(row.accessToken) ?? row.accessToken,
+    refreshToken: safeDecrypt(row.refreshToken) ?? row.refreshToken,
   };
 }
 
@@ -198,6 +212,113 @@ export const storage = {
       .select()
       .from(ceramicFollowups)
       .where(and(eq(ceramicFollowups.sent, false), lte(ceramicFollowups.sendAt, now)));
+  },
+
+  // ── email connections (Gmail OAuth) ──────────────────────────────────
+  // Tokens encrypted at rest; decrypted on read. One row per client.
+  async upsertEmailConnection(input: InsertEmailConnection): Promise<EmailConnection> {
+    const cid = currentClientId();
+    if (!cid) {
+      if (getTenantMode() === "multi") throw new Error("upsertEmailConnection: missing tenant context");
+      throw new Error("upsertEmailConnection: client id required");
+    }
+    const values = {
+      ...input,
+      clientId: cid,
+      accessToken: encrypt(input.accessToken),
+      refreshToken: encrypt(input.refreshToken),
+    };
+    const [row] = await db
+      .insert(emailConnections)
+      .values(values as typeof emailConnections.$inferInsert)
+      .onConflictDoUpdate({
+        target: emailConnections.clientId,
+        set: {
+          gmailAddress: values.gmailAddress,
+          accessToken: values.accessToken,
+          refreshToken: values.refreshToken,
+          tokenExpiry: values.tokenExpiry,
+          historyId: values.historyId,
+          active: true,
+        },
+      })
+      .returning();
+    return decryptConnection(row);
+  },
+
+  async getEmailConnection(): Promise<EmailConnection | undefined> {
+    const [row] = await db
+      .select()
+      .from(emailConnections)
+      .where(scope(emailConnections.clientId))
+      .limit(1);
+    return row ? decryptConnection(row) : undefined;
+  },
+
+  async updateEmailConnectionSync(patch: { historyId?: string | null; lastCheckedAt?: Date; accessToken?: string; tokenExpiry?: Date | null }): Promise<void> {
+    const set: Record<string, unknown> = {};
+    if (patch.historyId !== undefined) set.historyId = patch.historyId;
+    if (patch.lastCheckedAt !== undefined) set.lastCheckedAt = patch.lastCheckedAt;
+    if (patch.accessToken !== undefined) set.accessToken = encrypt(patch.accessToken);
+    if (patch.tokenExpiry !== undefined) set.tokenExpiry = patch.tokenExpiry;
+    if (Object.keys(set).length === 0) return;
+    await db.update(emailConnections).set(set).where(scope(emailConnections.clientId));
+  },
+
+  async deleteEmailConnection(): Promise<void> {
+    await db.delete(emailConnections).where(scope(emailConnections.clientId));
+  },
+
+  // Cross-tenant by design (the scheduler sweeps all connected clients).
+  async listEmailConnectedClients(): Promise<string[]> {
+    const rows = await db
+      .select({ clientId: emailConnections.clientId })
+      .from(emailConnections)
+      .where(eq(emailConnections.active, true));
+    return rows.map((r) => r.clientId);
+  },
+
+  // ── email threads ────────────────────────────────────────────────────
+  async createEmailThread(input: InsertEmailThread): Promise<EmailThread> {
+    const [row] = await db
+      .insert(emailThreads)
+      .values(withClientId(input) as typeof emailThreads.$inferInsert)
+      .returning();
+    return row;
+  },
+
+  async getEmailThreads(): Promise<EmailThread[]> {
+    return db
+      .select()
+      .from(emailThreads)
+      .where(scope(emailThreads.clientId))
+      .orderBy(desc(emailThreads.receivedAt));
+  },
+
+  async getEmailThread(id: number): Promise<EmailThread | undefined> {
+    const [row] = await db
+      .select()
+      .from(emailThreads)
+      .where(and(eq(emailThreads.id, id), scope(emailThreads.clientId)))
+      .limit(1);
+    return row;
+  },
+
+  async linkThreadToLead(threadId: number, leadId: number): Promise<void> {
+    await db
+      .update(emailThreads)
+      .set({ leadId })
+      .where(and(eq(emailThreads.id, threadId), scope(emailThreads.clientId)));
+  },
+
+  async markThreadSent(threadId: number, sentReply: string): Promise<EmailThread> {
+    const [row] = await db
+      .update(emailThreads)
+      .set({ status: "sent", sentReply, sentAt: new Date() })
+      .where(and(eq(emailThreads.id, threadId), scope(emailThreads.clientId)))
+      .returning();
+    if (!row) throw new Error(`Email thread ${threadId} not found in current tenant`);
+    return row;
   },
 
   // catalogues — per-factory PDF / Drive URLs the bot serves to buyers

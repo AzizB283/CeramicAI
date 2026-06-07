@@ -28,6 +28,7 @@ import {
 import {
   LayoutDashboard,
   Users,
+  Inbox,
   BookOpen,
   MessageSquare,
   Package,
@@ -39,6 +40,7 @@ import {
 const menuItems = [
   { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
   { title: "Leads", url: "/admin/leads", icon: Users },
+  { title: "Email Inbox", url: "/admin/email-inbox", icon: Inbox },
   { title: "Products", url: "/admin/products", icon: Package },
   { title: "Catalogues", url: "/admin/catalogues", icon: BookOpen },
   { title: "Chat Widget", url: "/admin/chat-widget", icon: MessageSquare },

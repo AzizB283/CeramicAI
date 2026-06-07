@@ -57,6 +57,20 @@
       "when": 1780288334866,
       "tag": "0007_owner_email",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1780481972779,
+      "tag": "0008_absent_the_hunter",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1780734073440,
+      "tag": "0009_nifty_bullseye",
+      "breakpoints": true
     }
   ]
 }
